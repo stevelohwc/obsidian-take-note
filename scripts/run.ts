@@ -3,7 +3,8 @@
 //   LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen2.5:14b node scripts/run.ts <audio-or-text-file>
 //
 // Settings come from environment variables or a local .env file (never committed):
-//   LLM_BASE_URL   OpenAI-compatible endpoint (default http://localhost:11434/v1, i.e. Ollama)
+//   LLM_PROVIDER   ollama | lmstudio | openai | anthropic | openrouter | custom (default: from the URL)
+//   LLM_BASE_URL   endpoint for ollama / lmstudio / custom (default http://localhost:11434/v1, i.e. Ollama)
 //   LLM_MODEL      model name (required)
 //   LLM_API_KEY    API key, if your server needs one
 //   MY_NAME        your name, so "I will…" becomes your action item
@@ -12,7 +13,7 @@
 //   TRANSCRIPT_ONLY=1  print the transcript and stop
 import fs from "node:fs";
 import path from "node:path";
-import { chatStream } from "../src/llm.ts";
+import { inferProvider, providerChat, type ProviderId } from "../src/providers.ts";
 import { extractMeeting } from "../src/extract.ts";
 import { renderMeeting } from "../src/render.ts";
 import { transcribeFile } from "../src/transcribe.ts";
@@ -25,6 +26,7 @@ const saved = env("TAKE_NOTE_DATA") && fs.existsSync(env("TAKE_NOTE_DATA")!) ? J
 const baseUrl = env("LLM_BASE_URL") ?? saved.baseUrl ?? "http://localhost:11434/v1";
 const model = env("LLM_MODEL") ?? saved.model ?? "";
 const apiKey = env("LLM_API_KEY") ?? env("LLM_ROUTER_KEY") ?? "";
+const provider = (env("LLM_PROVIDER") ?? saved.provider ?? inferProvider(baseUrl)) as ProviderId;
 const myName = env("MY_NAME") ?? saved.myName ?? "me";
 const [input] = process.argv.slice(2);
 if (!input || !model) {
@@ -75,7 +77,7 @@ if (/\.(md|txt)$/i.test(input)) {
 const t0 = Date.now();
 const result = await extractMeeting(
 	(messages, label) =>
-		chatStream({ baseUrl, apiKey, model }, messages, {
+		providerChat({ provider, baseUrl, apiKey, model }, messages, {
 			onProgress: (p) => process.stderr.write(`\r${label}: thinking ${p.reasoningChars} / writing ${p.contentChars} chars   `),
 		}),
 	{

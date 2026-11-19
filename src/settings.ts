@@ -1,12 +1,13 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type TakeNote from "./main.ts";
-import { listModels } from "./llm.ts";
+import { PROVIDERS, type ProviderId, providerModels } from "./providers.ts";
 import { listInputDevices } from "./recorder.ts";
 import { checkWhisperSetup } from "./transcribe.ts";
 import { findNode, forgetVoice, loadVoices, speakerSetupProblems } from "./voices.ts";
 
 export interface TakeNoteSettings {
 	// LLM
+	provider: ProviderId;
 	baseUrl: string;
 	apiKeySecret: string; // id in Obsidian's keychain-backed secret storage
 	model: string;
@@ -14,6 +15,11 @@ export interface TakeNoteSettings {
 	outputLanguage: string;
 	myName: string;
 	extraInstructions: string;
+	/** Settings of providers you switched away from, restored when you switch back. */
+	providerMemory: Partial<Record<ProviderId, { baseUrl: string; model: string; apiKeySecret: string }>>;
+	// Floating button
+	showFloatingButton: boolean;
+	floatingButtonPos: { right: number; bottom: number } | null;
 	// Notes
 	meetingsFolder: string;
 	peopleFolder: string;
@@ -43,6 +49,7 @@ export interface TakeNoteSettings {
 }
 
 export const DEFAULT_SETTINGS: TakeNoteSettings = {
+	provider: "ollama",
 	baseUrl: "http://localhost:11434/v1",
 	apiKeySecret: "",
 	model: "",
@@ -50,6 +57,9 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	outputLanguage: "English",
 	myName: "",
 	extraInstructions: "",
+	providerMemory: {},
+	showFloatingButton: true,
+	floatingButtonPos: null,
 	meetingsFolder: "Meetings",
 	peopleFolder: "People",
 	linkPeople: true,
@@ -76,6 +86,8 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 };
 
 export class TakeNoteSettingTab extends PluginSettingTab {
+	private models: string[] = [];
+
 	constructor(app: App, private plugin: TakeNote) {
 		super(app, plugin);
 	}
@@ -88,46 +100,86 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).setName("LLM").setHeading();
 
+		const provider = PROVIDERS[s.provider] ?? PROVIDERS.custom;
 		new Setting(containerEl)
-			.setName("API base URL")
-			.setDesc("Any OpenAI-compatible endpoint: Ollama (http://localhost:11434/v1), LM Studio (http://localhost:1234/v1), vLLM, LiteLLM, OpenAI, OpenRouter…")
-			.addText((t) =>
-				t.setValue(s.baseUrl).onChange(async (v) => {
-					s.baseUrl = v.trim();
+			.setName("Provider")
+			.setDesc(provider.hint)
+			.addDropdown((d) => {
+				for (const p of Object.values(PROVIDERS)) d.addOption(p.id, p.name);
+				d.setValue(provider.id).onChange(async (v) => {
+					this.plugin.switchProvider(v as ProviderId);
 					await save();
-				}),
-			);
+					this.display();
+				});
+			});
 
-		new Setting(containerEl)
-			.setName("API key")
-			.setDesc("Leave empty for local servers like Ollama. Stored in your system keychain via Obsidian's secret storage, not in the vault, so it never syncs or gets committed.")
-			.addComponent((el) =>
-				new SecretComponent(this.app, el).setValue(s.apiKeySecret).onChange(async (v) => {
-					s.apiKeySecret = v ?? "";
-					await save();
-				}),
-			);
+		if (provider.editableUrl) {
+			new Setting(containerEl)
+				.setName("API base URL")
+				.setDesc(provider.id === "custom" ? "The endpoint's /v1 URL, e.g. https://llm.example.com/v1" : `Default: ${provider.baseUrl}`)
+				.addText((t) =>
+					t
+						.setPlaceholder(provider.baseUrl || "https://llm.example.com/v1")
+						.setValue(s.baseUrl)
+						.onChange(async (v) => {
+							s.baseUrl = v.trim();
+							await save();
+						}),
+				);
+		}
 
+		if (provider.needsKey || provider.id === "custom") {
+			new Setting(containerEl)
+				.setName("API key")
+				.setDesc(
+					createFragment((f) => {
+						if (provider.keyUrl) {
+							f.createEl("a", { text: `Get a ${provider.name} key`, href: provider.keyUrl });
+							f.appendText(". ");
+						} else {
+							f.appendText("Leave empty if your server doesn't need one. ");
+						}
+						f.appendText("Stored in your system keychain, not in the vault, so it never syncs or gets committed.");
+					}),
+				)
+				.addComponent((el) =>
+					new SecretComponent(this.app, el).setValue(s.apiKeySecret).onChange(async (v) => {
+						s.apiKeySecret = v ?? "";
+						await save();
+					}),
+				);
+		}
+
+		const modelList = containerEl.createEl("datalist", { attr: { id: "take-note-models" } });
+		const fillModels = (ids: string[]) => {
+			modelList.empty();
+			ids.forEach((id) => modelList.createEl("option", { attr: { value: id } }));
+		};
+		fillModels(this.models);
 		new Setting(containerEl)
 			.setName("Model")
-			.setDesc("Click Test to list the models your server offers. Larger models write better notes; long meetings need a model with a large context window.")
-			.addText((t) =>
-				t.setValue(s.model).onChange(async (v) => {
-					s.model = v.trim();
-					await save();
-				}),
-			)
+			.setDesc("Click Load models to see what your provider offers, then pick one. Larger models write better notes; long meetings need a large context window.")
+			.addText((t) => {
+				t.setPlaceholder(provider.defaultModel || "Pick after loading models")
+					.setValue(s.model)
+					.onChange(async (v) => {
+						s.model = v.trim();
+						await save();
+					});
+				t.inputEl.setAttr("list", "take-note-models");
+			})
 			.addButton((b) =>
-				b.setButtonText("Test").onClick(async () => {
+				b.setButtonText("Load models").onClick(async () => {
+					b.setDisabled(true).setButtonText("Loading…");
 					try {
-						const models = await listModels({ baseUrl: s.baseUrl, apiKey: this.plugin.getApiKey() });
-						const ok = models.includes(s.model);
-						new Notice(
-							`Connected. ${models.length} models available.\n${ok ? "✅" : "⚠️ not found:"} ${s.model}\n\n${models.join("\n")}`,
-							10000,
-						);
+						this.models = await providerModels({ provider: s.provider, baseUrl: s.baseUrl, apiKey: this.plugin.getApiKey() });
+						fillModels(this.models);
+						const status = !s.model ? "Now pick one in the Model box." : this.models.includes(s.model) ? `✅ ${s.model} is available.` : `⚠️ ${s.model} is not in the list.`;
+						new Notice(`Connected to ${provider.name}: ${this.models.length} models.\n${status}`, 8000);
 					} catch (e) {
 						new Notice("❌ " + (e as Error).message, 10000);
+					} finally {
+						b.setDisabled(false).setButtonText("Load models");
 					}
 				}),
 			);
@@ -182,6 +234,27 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl).setName("Notes").setHeading();
+
+		new Setting(containerEl)
+			.setName("Floating mic button")
+			.setDesc("A mic button over your notes: click to start or stop recording, right-click for more. Drag it anywhere.")
+			.addToggle((t) =>
+				t.setValue(s.showFloatingButton).onChange(async (v) => {
+					s.showFloatingButton = v;
+					await save();
+					this.plugin.refreshFloatingButton();
+				}),
+			)
+			.addExtraButton((b) =>
+				b
+					.setIcon("rotate-ccw")
+					.setTooltip("Move it back to the corner")
+					.onClick(async () => {
+						s.floatingButtonPos = null;
+						await save();
+						this.plugin.refreshFloatingButton();
+					}),
+			);
 
 		new Setting(containerEl)
 			.setName("Meetings folder")
@@ -410,7 +483,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				}),
 			);
 
-		const paths: [keyof TakeNoteSettings, string, string][] = [
+		const paths: ["ffmpegPath" | "whisperPath" | "modelPath" | "vadModelPath", string, string][] = [
 			["ffmpegPath", "ffmpeg path", ""],
 			["whisperPath", "whisper-cli path", ""],
 			["modelPath", "Whisper model", "ggml model file. large-v3-turbo-q5_0 is a good speed/quality balance."],
@@ -421,8 +494,8 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				.setName(name)
 				.setDesc(desc)
 				.addText((t) =>
-					t.setValue(String(s[key])).onChange(async (v) => {
-						(s[key] as string) = v.trim();
+					t.setValue(s[key]).onChange(async (v) => {
+						s[key] = v.trim();
 						await save();
 					}),
 				);

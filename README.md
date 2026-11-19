@@ -12,6 +12,8 @@ an LLM of your choice turn it into a structured meeting note:
 - 👥 **By person**: what each person reported, committed to and asked
 - ⚠️ Risks, 📝 facts worth remembering, 🔜 things to follow up next time
 
+![The floating mic button: idle, recording, paused and thinking](docs/mascot.png)
+
 It also works without recording: write rough notes or paste a Zoom / Teams / Meet transcript,
 then run one command.
 
@@ -43,8 +45,9 @@ Ran the sync and approved the release plan.
 
 As required by Obsidian's developer policies:
 
-- **Network use.** The plugin only connects to the LLM server you set in **API base URL**,
-  to list models and send your meeting text. It sends no telemetry and has no ads. The
+- **Network use.** The plugin only connects to the LLM provider you choose (OpenAI,
+  Anthropic, OpenRouter, or the server URL you enter), to list models and send your meeting
+  text. It sends no telemetry and has no ads. The
   optional `scripts/setup-macos.sh` (which you run yourself, not the plugin) downloads
   Homebrew packages, the Whisper model from Hugging Face, and sherpa-onnx from npm and GitHub.
 - **Files outside your vault.** It reads and writes `~/.take-note/` (speaker-separation
@@ -59,9 +62,10 @@ As required by Obsidian's developer policies:
 ## Requirements
 
 - Obsidian **desktop** 1.11.4 or newer
-- An **OpenAI-compatible LLM**: a local one ([Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai)),
-  or a hosted API (OpenAI, OpenRouter, a LiteLLM / vLLM server…). A model with a large
-  context window (32K+) gives the best results on long meetings.
+- An **LLM**. Built in: **OpenAI**, **Claude (Anthropic)**, **OpenRouter**, plus local
+  [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai) or any OpenAI-compatible
+  server (vLLM, LiteLLM…). A model with a large context window (32K+) gives the best results
+  on long meetings.
 - **macOS** for the one-step setup script (Apple Silicon or Intel). The plugin itself is
   plain Obsidian + Node, so Linux/Windows should work if you install ffmpeg, whisper.cpp and
   sherpa-onnx yourself and set their paths in settings. This is untested; reports welcome.
@@ -89,9 +93,10 @@ As required by Obsidian's developer policies:
    Then reload Obsidian and enable **Take Note** in Settings → Community plugins.
 
 3. **Settings → Take Note**
-   - **API base URL**: e.g. `http://localhost:11434/v1` for Ollama.
-   - **API key**: only if your server needs one.
-   - **Model**: click **Test** to list the models your server offers.
+   - **Provider**: pick OpenAI, Claude, OpenRouter, Ollama, LM Studio or Other.
+   - **API key**: paste it for OpenAI / Claude / OpenRouter (each has a "Get a key" link).
+     Switching providers remembers each one's key and model.
+   - **Model**: click **Load models** and pick one. Claude starts on Claude Opus 5.5.
    - **Your name**: so "I will…" in your notes becomes your action item.
    - **Extra instructions** (recommended): team context, such as who the initials in your notes
      are, client names and ticket conventions. It makes a big difference.
@@ -101,11 +106,14 @@ As required by Obsidian's developer policies:
 
 | You want to… | Do this |
 |---|---|
-| Record a meeting | Click the 🎤 ribbon icon. Type your own notes under **My notes** while it records. Click the red timer in the status bar to stop. Transcript and AI notes appear automatically. |
+| Record a meeting | Click the floating mic button (or the ribbon icon). Type your own notes under **My notes** while it records. Click the red timer in the status bar to stop. Transcript and AI notes appear automatically. |
 | Only take rough notes | **New meeting note**, type, then run **Summarize & extract…** |
 | Process a Zoom/Teams/Meet transcript | Paste it into a note and run **Summarize & extract…** |
 | Process a recording file | **Import a recording…** (audio or video; it is not copied into the vault) |
 | Re-run after editing your notes | Run **Summarize & extract…** again. It only replaces the AI section. |
+
+The floating mic button changes face while it listens, pauses and thinks. Right-click it for
+more actions, drag it anywhere, or hide it in settings.
 
 All commands are in the command palette (Cmd/Ctrl+P) under "Take Note". You can assign
 hotkeys to Start / Stop recording.
@@ -140,7 +148,10 @@ that device under Settings → Microphone.
 | `src/transcribe.ts` | ffmpeg → whisper-cli, with speaker separation running in parallel |
 | `helper/speakers.cjs` | sherpa-onnx speaker separation + voice fingerprints (runs in a Node subprocess) |
 | `src/speakers.ts` | Merging split speakers, matching saved voices, labelling transcript lines |
+| `src/providers.ts` | Provider presets (OpenAI, Claude, OpenRouter, Ollama, LM Studio, custom) |
 | `src/llm.ts` | Streaming client for any OpenAI-compatible `/chat/completions` |
+| `src/claude.ts` | Claude through the official Anthropic SDK, streaming |
+| `src/fab.ts`, `src/mascot.ts` | The floating mic button and its mascot |
 | `src/extract.ts` | The prompt, JSON parsing, splitting long meetings and merging, priority checks |
 | `src/render.ts` | The Markdown written into your note |
 

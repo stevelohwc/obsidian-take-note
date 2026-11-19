@@ -1,6 +1,7 @@
 import {
 	FileSystemAdapter,
 	MarkdownView,
+	Menu,
 	Notice,
 	Plugin,
 	SuggestModal,
@@ -19,7 +20,9 @@ import { renameSpeaker, transcriptSpeakers } from "./speakers.ts";
 import { NameSpeakersModal, VoiceSampleModal } from "./modals.ts";
 import * as fs from "fs";
 import * as os from "os";
-import { chatStream } from "./llm.ts";
+import { PROVIDERS, type ProviderId, inferProvider, providerChat } from "./providers.ts";
+import { FloatingButton } from "./fab.ts";
+import { MASCOT_ICON, registerMascotIcons } from "./mascot.ts";
 import { extractMeeting, type MeetingNotes } from "./extract.ts";
 import {
 	AI_END,
@@ -86,6 +89,8 @@ export default class TakeNote extends Plugin {
 	private recording: { note: TFile; audioPath: string } | null = null;
 	private statusEl!: HTMLElement;
 	private jobs = new Map<string, AbortController>(); // note path -> running job
+	private fab: FloatingButton | null = null;
+	private busyText = "Working…";
 
 	async onload() {
 		await this.loadSettings();
@@ -98,10 +103,10 @@ export default class TakeNote extends Plugin {
 		});
 		this.registerInterval(window.setInterval(() => this.updateStatus(), 1000));
 
-		this.addRibbonIcon("mic", "Take Note: start / stop recording", () => {
-			if (this.recording) void this.stopRecording();
-			else void this.startRecording(this.isMeetingNote(this.activeNote()) ? "current" : "new");
-		});
+		registerMascotIcons();
+		this.addRibbonIcon(MASCOT_ICON.idle, "Take Note: start / stop recording", () => this.toggleRecording());
+		this.app.workspace.onLayoutReady(() => this.refreshFloatingButton());
+		this.registerDomEvent(window, "resize", () => this.fab?.clamp());
 
 		this.addCommand({
 			id: "new-meeting-note",
@@ -206,13 +211,107 @@ export default class TakeNote extends Plugin {
 	}
 
 	onunload() {
+		this.fab?.destroy();
 		this.jobs.forEach((c) => c.abort());
 		// Flush audio so nothing is lost (best effort).
 		if (this.recording) this.recorder.stop().catch(() => {});
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<TakeNoteSettings> | null);
+		const saved = (await this.loadData()) as Partial<TakeNoteSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+		// Settings from before providers existed: work out which one the URL points at.
+		if (saved && !saved.provider) this.settings.provider = inferProvider(this.settings.baseUrl);
+	}
+
+	/** Switch LLM provider, remembering the old one's URL, model and key for switching back. */
+	switchProvider(to: ProviderId) {
+		const s = this.settings;
+		if (to === s.provider) return;
+		s.providerMemory = { ...s.providerMemory, [s.provider]: { baseUrl: s.baseUrl, model: s.model, apiKeySecret: s.apiKeySecret } };
+		const p = PROVIDERS[to];
+		const back = s.providerMemory[to];
+		s.provider = to;
+		s.baseUrl = back?.baseUrl || p.baseUrl;
+		s.model = back?.model ?? p.defaultModel;
+		s.apiKeySecret = back?.apiKeySecret ?? "";
+	}
+
+	// ---------- floating button ----------
+
+	refreshFloatingButton() {
+		if (!this.settings.showFloatingButton) {
+			this.fab?.destroy();
+			this.fab = null;
+			return;
+		}
+		this.fab?.destroy();
+		this.fab = new FloatingButton(this.app.workspace.containerEl, this.settings.floatingButtonPos, {
+			onClick: () => {
+				if (!this.recording && this.jobs.size) new Notice(`Take Note is busy: ${this.busyText} Right-click the button to cancel.`);
+				else this.toggleRecording();
+			},
+			onMenu: (evt) => this.fabMenu(evt),
+			onMoved: (pos) => {
+				this.settings.floatingButtonPos = pos;
+				void this.saveSettings();
+			},
+		});
+		this.updateStatus();
+	}
+
+	private fabMenu(evt: MouseEvent) {
+		const menu = new Menu();
+		const note = this.activeNote();
+		const add = (title: string, icon: string, run: () => void) => menu.addItem((i) => i.setTitle(title).setIcon(icon).onClick(run));
+		if (this.recording) {
+			add(this.recorder.isPaused ? "Resume recording" : "Pause recording", this.recorder.isPaused ? "play" : "pause", () => {
+				if (this.recorder.isPaused) this.recorder.resume();
+				else this.recorder.pause();
+				this.updateStatus();
+			});
+			add("Stop recording", "square", () => void this.stopRecording());
+		} else {
+			add("Record in a new meeting note", "mic", () => void this.startRecording("new"));
+			if (note) add("Record in this note", "file-audio", () => void this.startRecording("current"));
+		}
+		if (this.jobs.size) {
+			add("Cancel the running job", "x", () => {
+				this.jobs.forEach((c) => c.abort());
+				new Notice("Take Note: cancelled.");
+			});
+		}
+		menu.addSeparator();
+		if (note) {
+			add("Summarize this note with AI", "sparkles", () => void this.processNote(note));
+			add("Transcribe audio in this note", "audio-lines", () => void this.transcribeEmbedded(note));
+			add("Name the speakers", "users", () => void this.nameSpeakers(note));
+		}
+		add("Import a recording…", "upload", () => this.importRecording());
+		add("New meeting note", "file-plus", () => {
+			void this.createMeetingNote().then((f) => this.openNote(f));
+		});
+		menu.addSeparator();
+		add("Hide this button", "eye-off", () => {
+			this.settings.showFloatingButton = false;
+			void this.saveSettings();
+			this.refreshFloatingButton();
+			new Notice("Floating button hidden. Turn it back on in Settings → Take Note.");
+		});
+		menu.showAtMouseEvent(evt);
+	}
+
+	private toggleRecording() {
+		if (this.recording) void this.stopRecording();
+		else void this.startRecording(this.isMeetingNote(this.activeNote()) ? "current" : "new");
+	}
+
+	/** Show progress of a long job in the status bar and on the floating button. */
+	private showBusy(text: string, short: string) {
+		this.busyText = text;
+		this.statusEl.setText(short);
+		this.statusEl.show();
+		this.fab?.set("busy", text, true);
 	}
 
 	/** data.json changed on disk (iCloud sync or an outside edit): reload so we never overwrite it with stale values. */
@@ -291,9 +390,13 @@ export default class TakeNote extends Plugin {
 			this.statusEl.setAttr("aria-label", "Click to stop recording");
 			this.statusEl.toggleClass("is-recording", !paused);
 			this.statusEl.show();
+			this.fab?.set(paused ? "paused" : "recording", `${paused ? "Paused" : "Recording"} ${formatClock(this.recorder.elapsedMs)}`, true);
 		} else if (!this.jobs.size) {
 			this.statusEl.setText("");
 			this.statusEl.hide();
+			this.fab?.set("idle", "Record a meeting");
+		} else {
+			this.fab?.set("busy", this.busyText, true);
 		}
 	}
 
@@ -548,6 +651,7 @@ export default class TakeNote extends Plugin {
 		const ctrl = new AbortController();
 		this.jobs.set(note.path, ctrl);
 		const progress = new Progress("🎙️ Preparing transcription…");
+		this.showBusy("Transcribing…", "🎙️");
 		const started = Date.now();
 		try {
 			const s = this.settings;
@@ -559,8 +663,7 @@ export default class TakeNote extends Plugin {
 				{ ...s, prompt },
 				(pct, stage) => {
 					progress.set(`🎙️ ${stage}… ${pct}%  (${formatClock(Date.now() - started)})`);
-					this.statusEl.setText(`🎙️ ${pct}%`);
-					this.statusEl.show();
+					this.showBusy(`${stage} ${pct}%`, `🎙️ ${pct}%`);
 				},
 				ctrl.signal,
 				speakers ?? undefined,
@@ -603,8 +706,13 @@ export default class TakeNote extends Plugin {
 
 	async processNote(note: TFile) {
 		const apiKey = this.getApiKey(); // may be empty for local servers (Ollama, LM Studio)
-		if (!this.settings.model || !this.settings.baseUrl) {
-			new Notice("Set your LLM server and model in Settings → Take Note first (click Test to list models).", 10000);
+		const provider = PROVIDERS[this.settings.provider] ?? PROVIDERS.custom;
+		if (!this.settings.model || (provider.editableUrl && !this.settings.baseUrl)) {
+			new Notice("Pick an AI provider and model in Settings → Take Note first (Load models lists them).", 10000);
+			return;
+		}
+		if (provider.needsKey && !apiKey) {
+			new Notice(`Add your ${provider.name} API key in Settings → Take Note first.`, 10000);
 			return;
 		}
 		if (this.jobs.has(note.path)) {
@@ -622,17 +730,17 @@ export default class TakeNote extends Plugin {
 		this.jobs.set(note.path, ctrl);
 		const s = this.settings;
 		const progress = new Progress("🧠 Sending to " + s.model + "…");
+		this.showBusy("Thinking…", "🧠 AI…");
 		const started = Date.now();
 		try {
 			const result: MeetingNotes = await extractMeeting(
 				(messages, label) =>
-					chatStream({ baseUrl: s.baseUrl, apiKey, model: s.model }, messages, {
+					providerChat({ provider: s.provider, baseUrl: s.baseUrl, apiKey, model: s.model }, messages, {
 						signal: ctrl.signal,
 						onProgress: (p) => {
 							const what = p.contentChars ? `writing (${p.contentChars} chars)` : `thinking (${p.reasoningChars} chars)`;
 							progress.set(`🧠 ${label}… ${what}  ${formatClock(Date.now() - started)}`);
-							this.statusEl.setText("🧠 AI…");
-							this.statusEl.show();
+							this.showBusy(p.contentChars ? "Writing notes…" : "Thinking…", "🧠 AI…");
 						},
 					}),
 				{

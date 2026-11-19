@@ -1,6 +1,6 @@
 {
   "name": "obsidian-take-note",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Obsidian plugin: record meetings, transcribe locally with Whisper, separate speakers, and turn meetings into summaries, action items, tickets and AI assignments with any OpenAI-compatible LLM.",
   "main": "main.js",
   "private": true,
@@ -27,5 +27,8 @@
     "type": "git",
     "url": "https://github.com/stevelohwc/obsidian-take-note.git"
   },
-  "author": "stevelohwc"
+  "author": "stevelohwc",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.10.0"
+  }
 }

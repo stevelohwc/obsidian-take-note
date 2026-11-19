@@ -4,3 +4,87 @@
 .take-note-sample { font-style: italic; margin-top: 2px; }
 .take-note-readaloud { border-left: 3px solid var(--interactive-accent); padding: 8px 12px; margin: 12px 0; font-size: var(--font-ui-medium); }
 .take-note-wide { width: 100%; }
+
+/* ---------- Mascot (ribbon + floating button) ---------- */
+.tn-mascot .tn-face { fill: var(--background-secondary); }
+.tn-mascot .tn-face-line { stroke: var(--background-secondary); }
+.tn-mascot .tn-shine, .tn-mascot .tn-cheek { display: none; }
+
+/* ---------- Floating mic button ---------- */
+.take-note-fab {
+	position: fixed;
+	right: var(--take-note-fab-right, 24px);
+	bottom: var(--take-note-fab-bottom, 48px);
+	z-index: var(--layer-status-bar);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	pointer-events: none;
+}
+.take-note-fab-button {
+	pointer-events: auto;
+	width: 52px;
+	height: 52px;
+	padding: 0;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--background-secondary-alt);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	cursor: grab;
+	touch-action: none;
+	transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.take-note-fab-button:hover { transform: translateY(-2px); box-shadow: var(--shadow-l); background: var(--background-secondary-alt); }
+.take-note-fab-button:focus-visible { box-shadow: 0 0 0 3px var(--interactive-accent); }
+.take-note-fab.is-dragging .take-note-fab-button { cursor: grabbing; transform: scale(1.06); }
+.take-note-fab-button .svg-icon { width: 38px; height: 38px; overflow: visible; }
+
+/* Mascot colours inside the button: a cream mic with a little face and rosy cheeks. */
+.take-note-fab .tn-body { fill: #f6efe3; }
+.take-note-fab .tn-stand { stroke: var(--text-muted); }
+.take-note-fab .tn-face { fill: #3a3330; }
+.take-note-fab .tn-face-line { stroke: #3a3330; }
+.take-note-fab .tn-cheek { display: inline; fill: #f4a3a8; opacity: 0.85; }
+.take-note-fab .tn-shine { display: inline; fill: #ffffff; }
+.take-note-fab .tn-wave { stroke: var(--color-red); }
+.take-note-fab .tn-sparkle { fill: var(--color-yellow); }
+
+.take-note-fab[data-mood="recording"] .tn-body { fill: #ff8a8a; }
+.take-note-fab[data-mood="recording"] .take-note-fab-button { border-color: var(--color-red); }
+.take-note-fab[data-mood="busy"] .tn-body { fill: #c9b8ff; }
+.take-note-fab[data-mood="paused"] .tn-body { fill: #e8e0d2; }
+
+.take-note-fab-label {
+	order: -1;
+	pointer-events: none;
+	padding: 4px 10px;
+	border-radius: var(--radius-l);
+	background: var(--background-secondary-alt);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	font-size: var(--font-ui-small);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	opacity: 0;
+	transform: translateX(6px);
+	transition: opacity 120ms ease, transform 120ms ease;
+}
+.take-note-fab:hover .take-note-fab-label,
+.take-note-fab.is-pinned .take-note-fab-label { opacity: 1; transform: none; }
+.take-note-fab.is-dragging .take-note-fab-label { opacity: 0; }
+
+@keyframes take-note-bob { 50% { transform: translateY(-3px); } }
+@keyframes take-note-ring { 0% { box-shadow: 0 0 0 0 rgba(var(--color-red-rgb), 0.45); } 100% { box-shadow: 0 0 0 14px rgba(var(--color-red-rgb), 0); } }
+@keyframes take-note-wave { 50% { opacity: 0.25; } }
+@keyframes take-note-twinkle { 50% { opacity: 0.3; transform: scale(0.8); } }
+.take-note-fab[data-mood="idle"] .take-note-fab-button:hover .svg-icon { animation: take-note-bob 1.2s ease-in-out infinite; }
+.take-note-fab[data-mood="recording"] .take-note-fab-button { animation: take-note-ring 1.6s ease-out infinite; }
+.take-note-fab[data-mood="recording"] .tn-wave { animation: take-note-wave 1.2s ease-in-out infinite; }
+.take-note-fab[data-mood="busy"] .svg-icon { animation: take-note-bob 1.6s ease-in-out infinite; }
+.take-note-fab[data-mood="busy"] .tn-sparkle { transform-origin: 84px 13px; animation: take-note-twinkle 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+	.take-note-fab * { animation: none !important; }
+}

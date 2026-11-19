@@ -13,6 +13,7 @@ export interface LlmConfig {
 	baseUrl: string; // e.g. http://localhost:11434/v1
 	apiKey: string;
 	model: string;
+	headers?: Record<string, string>; // extra headers, e.g. OpenRouter attribution
 }
 
 export interface StreamProgress {
@@ -30,6 +31,7 @@ function request(
 	apiKey: string,
 	body: string | null,
 	signal?: AbortSignal,
+	extraHeaders: Record<string, string> = {},
 ): Promise<http.IncomingMessage> {
 	const lib = url.protocol === "http:" ? http : https;
 	return new Promise((resolve, reject) => {
@@ -38,6 +40,7 @@ function request(
 			{
 				method,
 				headers: {
+					...extraHeaders,
 					...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
 					"Content-Type": "application/json",
 					Accept: body ? "text/event-stream" : "application/json",
@@ -97,7 +100,7 @@ function errorMessage(status: number | undefined, body: string): string {
 }
 
 export async function listModels(cfg: Omit<LlmConfig, "model">): Promise<string[]> {
-	const res = await request(endpoint(cfg.baseUrl, "/models"), "GET", cfg.apiKey, null);
+	const res = await request(endpoint(cfg.baseUrl, "/models"), "GET", cfg.apiKey, null, undefined, cfg.headers);
 	const body = await readAll(res);
 	if ((res.statusCode ?? 0) >= 400) throw new Error(errorMessage(res.statusCode, body));
 	const j = JSON.parse(body) as ModelList;
@@ -109,14 +112,17 @@ export async function chatStream(
 	messages: ChatMessage[],
 	opts: { temperature?: number; maxTokens?: number; signal?: AbortSignal; onProgress?: (p: StreamProgress) => void } = {},
 ): Promise<string> {
+	// OpenAI's own API rejects max_tokens and custom temperatures on its reasoning models.
+	const openai = endpoint(cfg.baseUrl, "").hostname === "api.openai.com";
 	const body = JSON.stringify({
 		model: cfg.model,
 		messages,
 		stream: true,
-		temperature: opts.temperature ?? 0.2,
-		max_tokens: opts.maxTokens ?? 16000,
+		...(openai
+			? { max_completion_tokens: opts.maxTokens ?? 16000 }
+			: { temperature: opts.temperature ?? 0.2, max_tokens: opts.maxTokens ?? 16000 }),
 	});
-	const res = await request(endpoint(cfg.baseUrl, "/chat/completions"), "POST", cfg.apiKey, body, opts.signal);
+	const res = await request(endpoint(cfg.baseUrl, "/chat/completions"), "POST", cfg.apiKey, body, opts.signal, cfg.headers);
 	if ((res.statusCode ?? 0) >= 400) throw new Error(errorMessage(res.statusCode, await readAll(res)));
 
 	// Some servers ignore stream:true and reply with plain JSON.

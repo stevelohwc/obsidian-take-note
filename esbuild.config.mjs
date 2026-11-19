@@ -12,6 +12,7 @@ const ctx = await esbuild.context({
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
+  minify: prod,
   outfile: "main.js",
   loader: { ".cjs": "text" }, // helper/speakers.cjs is embedded as a string
   platform: "node",
