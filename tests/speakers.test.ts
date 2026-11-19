@@ -75,7 +75,7 @@ test("transcriptSpeakers and renameSpeaker work on the callout transcript", () =
 	// The AI still reads the transcript with speaker labels, and not the session marker.
 	const { transcript } = collectSources(upsertBlock("# T\n", TX_START, TX_END, renamed, "end"));
 	assert.ok(transcript.startsWith("[00:00:00] Dana: Morning all."));
-	assert.ok(!transcript.includes("mc-speakers"));
+	assert.ok(!transcript.includes("take-note:speakers"));
 });
 
 test("upsertPersonLine appends under ## Notes and replaces on re-run", () => {

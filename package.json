@@ -1,6 +1,6 @@
 {
-  "name": "obsidian-meeting-copilot",
-  "version": "0.2.0",
+  "name": "obsidian-take-note",
+  "version": "1.0.0",
   "description": "Obsidian plugin: record meetings, transcribe locally with Whisper, separate speakers, and turn meetings into summaries, action items, tickets and AI assignments with any OpenAI-compatible LLM.",
   "main": "main.js",
   "private": true,
@@ -9,20 +9,23 @@
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
     "deploy": "npm run build && node scripts/deploy.mjs",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "lint": "eslint ."
   },
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "builtin-modules": "^4.0.0",
     "esbuild": "^0.25.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.6.0",
     "obsidian": "latest",
     "tslib": "^2.8.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.73.0"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/stevelohwc/obsidian-meeting-copilot.git"
+    "url": "https://github.com/stevelohwc/obsidian-take-note.git"
   },
   "author": "stevelohwc"
 }

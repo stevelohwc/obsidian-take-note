@@ -127,7 +127,7 @@ function userPrompt(notes: string, transcript: string, part?: { index: number; t
 
 /** Rough token estimate: CJK characters are ~1 token each, other text ~4 chars per token. */
 export function estimateTokens(text: string): number {
-	const cjk = (text.match(/[　-鿿가-힯豈-﫿]/g) || []).length;
+	const cjk = (text.match(/[\u3000-\u9fff\uac00-\ud7af\uf900-\ufaff]/g) || []).length;
 	return cjk + Math.ceil((text.length - cjk) / 4);
 }
 
@@ -178,15 +178,25 @@ export function parseJsonReply(reply: string): unknown {
 	}
 }
 
-const str = (v: unknown): string => (typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim());
+const str = (v: unknown): string => {
+	if (typeof v === "string") return v.trim();
+	if (typeof v === "number" || typeof v === "boolean") return String(v);
+	return v == null ? "" : JSON.stringify(v);
+};
 const strOrNull = (v: unknown): string | null => {
 	const s = str(v);
 	return s && !/^(null|none|n\/a|unknown|unassigned|tbd|-)$/i.test(s) ? s : null;
 };
+const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? (v as unknown[]) : v ? [v] : []);
+// Models sometimes return {"text": "..."} instead of a plain string: take the first value.
 const strList = (v: unknown): string[] =>
-	(Array.isArray(v) ? v : v ? [v] : []).map((x) => (typeof x === "object" && x ? str(Object.values(x)[0]) : str(x))).filter(Boolean);
+	asArray(v)
+		.map((x) => (typeof x === "object" && x ? str(Object.values(x as Record<string, unknown>)[0]) : str(x)))
+		.filter(Boolean);
 const objList = (v: unknown): Record<string, unknown>[] =>
-	(Array.isArray(v) ? v : []).map((x) => (typeof x === "string" ? { task: x, question: x, title: x } : x)).filter((x) => x && typeof x === "object");
+	(Array.isArray(v) ? (v as unknown[]) : [])
+		.map((x) => (typeof x === "string" ? { task: x, question: x, title: x } : x))
+		.filter((x): x is Record<string, unknown> => !!x && typeof x === "object");
 const prio = <T extends string>(v: unknown, allowed: T[], fallback: T | null): T | null => {
 	const s = str(v).toLowerCase();
 	if ((allowed as string[]).includes(s)) return s as T;
@@ -309,7 +319,7 @@ async function askJson(chat: ChatFn, system: string, user: string, label: string
 	const reply = await chat(messages, label);
 	try {
 		return normalize(parseJsonReply(reply));
-	} catch (e) {
+	} catch {
 		// One retry with a firmer reminder.
 		const retry = await chat(
 			[...messages, { role: "user", content: "Your previous reply was not valid JSON. Reply again with ONLY the JSON object." }],

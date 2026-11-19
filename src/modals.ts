@@ -5,7 +5,7 @@ import { MeetingRecorder } from "./recorder.ts";
 import { formatClock, safeFileName } from "./render.ts";
 
 function peopleDatalist(container: HTMLElement, people: string[]): string {
-	const id = "mc-people-" + Math.random().toString(36).slice(2);
+	const id = "take-note-people-" + Math.random().toString(36).slice(2);
 	const list = container.createEl("datalist", { attr: { id } });
 	people.forEach((p) => list.createEl("option", { attr: { value: p } }));
 	return id;
@@ -36,7 +36,7 @@ export class NameSpeakersModal extends Modal {
 			const unknown = /^Speaker \d+$/.test(sp.label);
 			const setting = new Setting(contentEl).setName(sp.label);
 			const desc = setting.descEl;
-			for (const s of sp.samples) desc.createEl("div", { text: `“${s}”`, cls: "meeting-copilot-sample" });
+			for (const s of sp.samples) desc.createDiv({ text: `“${s}”`, cls: "take-note-sample" });
 			setting.addText((t) => {
 				t.setPlaceholder(unknown ? "Name" : "Correct name (if wrong)");
 				t.inputEl.setAttr("list", listId);
@@ -111,7 +111,7 @@ export class VoiceSampleModal extends Modal {
 			t.inputEl.setAttr("list", listId);
 			t.onChange((v) => (this.name = safeFileName(v).replace(/:/g, "")));
 		});
-		contentEl.createEl("blockquote", { text: READ_ALOUD, cls: "meeting-copilot-readaloud" });
+		contentEl.createEl("blockquote", { text: READ_ALOUD, cls: "take-note-readaloud" });
 		const status = contentEl.createEl("p", { text: "Ready." });
 		let btn: HTMLButtonElement;
 		new Setting(contentEl).addButton((b) => {
@@ -124,7 +124,7 @@ export class VoiceSampleModal extends Modal {
 							new Notice("Enter the person's name first.");
 							return;
 						}
-						this.file = path.join(os.tmpdir(), `meeting-copilot-voice-${Date.now()}.${this.recorder.ext}`);
+						this.file = path.join(os.tmpdir(), `take-note-voice-${Date.now()}.${this.recorder.ext}`);
 						try {
 							await this.recorder.start(this.file, this.deviceId || undefined);
 						} catch (e) {
@@ -159,9 +159,9 @@ export class VoiceSampleModal extends Modal {
 		});
 	}
 
-	async onClose() {
+	onClose() {
 		window.clearInterval(this.timer);
-		if (this.recorder.isRecording) await this.recorder.stop().catch(() => {});
+		if (this.recorder.isRecording) this.recorder.stop().catch(() => {});
 		this.contentEl.empty();
 	}
 }

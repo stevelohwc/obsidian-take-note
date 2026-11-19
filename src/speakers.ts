@@ -169,7 +169,7 @@ export function labelTranscript(
 export function transcriptSpeakers(transcript: string): { label: string; samples: string[] }[] {
 	const found = new Map<string, string[]>();
 	for (const line of transcript.split("\n")) {
-		const m = line.match(/^(?:>\s?)?(?:\[[\d:]+\]\s+)?([^:\[\]\n]{1,40}?):\s+(.+)$/);
+		const m = line.match(/^(?:>\s?)?(?:\[[\d:]+\]\s+)?([^:[\]\n]{1,40}?):\s+(.+)$/);
 		if (!m) continue;
 		const [, label, text] = m;
 		if (!found.has(label)) found.set(label, []);

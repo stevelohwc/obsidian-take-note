@@ -58,6 +58,27 @@ function request(
 	});
 }
 
+/** The parts of OpenAI-compatible responses we read. */
+interface ApiError {
+	error?: { message?: string } | string;
+	message?: string;
+}
+interface ModelList {
+	data?: { id: string }[];
+}
+interface ChatResponse extends ApiError {
+	choices?: {
+		message?: { content?: string };
+		delta?: { content?: string; reasoning_content?: string; reasoning?: string };
+		finish_reason?: string | null;
+	}[];
+}
+
+function apiErrorText(j: ApiError): string | undefined {
+	if (typeof j.error === "string") return j.error;
+	return j.error?.message ?? j.message;
+}
+
 async function readAll(res: http.IncomingMessage): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const c of res) chunks.push(c as Buffer);
@@ -67,12 +88,11 @@ async function readAll(res: http.IncomingMessage): Promise<string> {
 function errorMessage(status: number | undefined, body: string): string {
 	let msg = body.slice(0, 500);
 	try {
-		const j = JSON.parse(body);
-		msg = j?.error?.message ?? j?.message ?? msg;
+		msg = apiErrorText(JSON.parse(body) as ApiError) ?? msg;
 	} catch {
 		/* not JSON */
 	}
-	if (status === 401) return `LLM key rejected (401): ${msg}. Check the API key in Meeting Copilot settings.`;
+	if (status === 401) return `LLM key rejected (401): ${msg}. Check the API key in Take Note settings.`;
 	return `LLM request failed (${status}): ${msg}`;
 }
 
@@ -80,8 +100,8 @@ export async function listModels(cfg: Omit<LlmConfig, "model">): Promise<string[
 	const res = await request(endpoint(cfg.baseUrl, "/models"), "GET", cfg.apiKey, null);
 	const body = await readAll(res);
 	if ((res.statusCode ?? 0) >= 400) throw new Error(errorMessage(res.statusCode, body));
-	const j = JSON.parse(body);
-	return (j.data ?? []).map((m: { id: string }) => m.id);
+	const j = JSON.parse(body) as ModelList;
+	return (j.data ?? []).map((m) => m.id);
 }
 
 export async function chatStream(
@@ -101,8 +121,8 @@ export async function chatStream(
 
 	// Some servers ignore stream:true and reply with plain JSON.
 	if (!String(res.headers["content-type"] ?? "").includes("event-stream")) {
-		const j = JSON.parse(await readAll(res));
-		return j?.choices?.[0]?.message?.content ?? "";
+		const j = JSON.parse(await readAll(res)) as ChatResponse;
+		return j.choices?.[0]?.message?.content ?? "";
 	}
 
 	let content = "";
@@ -119,8 +139,8 @@ export async function chatStream(
 			const data = line.slice(5).trim();
 			if (data === "[DONE]") continue;
 			try {
-				const j = JSON.parse(data);
-				if (j.error) throw new Error(j.error.message ?? JSON.stringify(j.error));
+				const j = JSON.parse(data) as ChatResponse;
+				if (j.error) throw new Error(apiErrorText(j) ?? "LLM stream error");
 				const choice = j.choices?.[0];
 				const delta = choice?.delta ?? {};
 				if (typeof delta.content === "string") content += delta.content;

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Speaker separation + voice fingerprints for Meeting Copilot, using sherpa-onnx.
+// Speaker separation + voice fingerprints for Take Note, using sherpa-onnx.
 // Runs as a separate Node process (Obsidian can't host heavy native work on its UI thread).
 //
 //   node speakers.cjs diarize <16k-mono.wav> [numSpeakers] [clusterThreshold]
@@ -7,12 +7,12 @@
 //   node speakers.cjs embed <16k-mono.wav>
 //     -> {"embedding":[...], "seconds":n}
 //
-// MC_HOME (default ~/.meeting-copilot) must contain node_modules/sherpa-onnx-node and models/.
+// TAKE_NOTE_HOME (default ~/.take-note) must contain node_modules/sherpa-onnx-node and models/.
 "use strict";
 const path = require("path");
 const os = require("os");
 
-const home = process.env.MC_HOME || path.join(os.homedir(), ".meeting-copilot");
+const home = process.env.TAKE_NOTE_HOME || path.join(os.homedir(), ".take-note");
 const sherpa = require(path.join(home, "node_modules", "sherpa-onnx-node"));
 const SEG_MODEL = path.join(home, "models", "sherpa-onnx-pyannote-segmentation-3-0", "model.onnx");
 const EMB_MODEL = path.join(home, "models", "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx");
@@ -99,7 +99,9 @@ function diarize(file, numSpeakers, threshold) {
 }
 
 function main() {
-	const [cmd, file, a, b] = process.argv.slice(2);
+	// Run either as a file (node speakers.cjs diarize …) or inline (node -e "<source>" diarize …).
+	const args = process.argv.slice(process.argv[1] && /\.c?js$/.test(process.argv[1]) ? 2 : 1);
+	const [cmd, file, a, b] = args;
 	if (cmd === "diarize") {
 		const out = diarize(file, parseInt(a || "0", 10) || 0, parseFloat(b || "0.5") || 0.5);
 		process.stdout.write(JSON.stringify(out));

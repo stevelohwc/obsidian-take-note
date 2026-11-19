@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Installs the local tools Meeting Copilot uses on macOS:
+# Installs the local tools Take Note uses on macOS:
 #   - ffmpeg + whisper.cpp (speech-to-text)            via Homebrew
 #   - a multilingual Whisper model (~574 MB)           into ~/.cache/whisper
-#   - sherpa-onnx + 2 speaker models (~80 MB)          into ~/.meeting-copilot   (skip with --no-speakers)
+#   - sherpa-onnx + 2 speaker models (~80 MB)          into ~/.take-note   (skip with --no-speakers)
 # Everything runs and stays on your Mac.
 set -euo pipefail
 
@@ -39,11 +39,11 @@ if [[ "$SPEAKERS" == 1 ]]; then
     say "Installing Node.js (needed to run speaker separation)"
     brew install node
   fi
-  MC_HOME="${MC_HOME:-$HOME/.meeting-copilot}"
-  say "Installing sherpa-onnx into $MC_HOME"
-  mkdir -p "$MC_HOME/models"
-  cd "$MC_HOME"
-  [[ -f package.json ]] || echo '{"name":"meeting-copilot-helper","private":true}' > package.json
+  TAKE_NOTE_HOME="${TAKE_NOTE_HOME:-$HOME/.take-note}"
+  say "Installing sherpa-onnx into $TAKE_NOTE_HOME"
+  mkdir -p "$TAKE_NOTE_HOME/models"
+  cd "$TAKE_NOTE_HOME"
+  [[ -f package.json ]] || echo '{"name":"take-note-helper","private":true}' > package.json
   # 2.0.1 is pinned: it is the newest release with macOS builds at the time of writing.
   npm install --silent --save-exact sherpa-onnx-node@2.0.1
   cd models
@@ -60,7 +60,7 @@ if [[ "$SPEAKERS" == 1 ]]; then
       "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/$EMB"
     mv "$EMB.part" "$EMB"
   fi
-  MC_HOME="$MC_HOME" node -e 'require(process.env.MC_HOME + "/node_modules/sherpa-onnx-node"); console.log("sherpa-onnx OK")'
+  TAKE_NOTE_HOME="$TAKE_NOTE_HOME" node -e 'require(process.env.TAKE_NOTE_HOME + "/node_modules/sherpa-onnx-node"); console.log("sherpa-onnx OK")'
 fi
 
-say "Done. In Obsidian: Settings → Meeting Copilot → \"Check Whisper setup\" and \"Check speaker setup\"."
+say "Done. In Obsidian: Settings → Take Note → \"Check Whisper setup\" and \"Check speaker setup\"."

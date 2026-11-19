@@ -29,7 +29,7 @@ export interface WhisperConfig {
 
 export interface SpeakerConfig {
 	nodePath: string; // resolved node binary
-	helperScript: string; // absolute path to speakers.cjs
+	helperSource: string; // source of helper/speakers.cjs, run with `node -e` (nothing is written to disk)
 	numSpeakers: number; // 0 = auto
 	clusterThreshold: number;
 	mergeThreshold: number;
@@ -72,17 +72,17 @@ export function run(
 		try {
 			child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: env ?? process.env });
 		} catch (e) {
-			reject(e);
+			reject(e instanceof Error ? e : new Error(String(e)));
 			return;
 		}
 		let stdout = "";
 		let stderr = "";
-		child.stdout?.on("data", (d) => (stdout += d.toString()));
-		child.stderr?.on("data", (d) => {
+		child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
+		child.stderr?.on("data", (d: Buffer) => {
 			const s = d.toString();
 			stderr += s;
 			if (stderr.length > 200_000) stderr = stderr.slice(-100_000);
-			if (onStderr) s.split(/\r?\n|\r/).forEach((l: string) => l && onStderr(l));
+			if (onStderr) for (const l of s.split(/\r?\n|\r/)) if (l) onStderr(l);
 		});
 		const abort = () => child.kill("SIGKILL");
 		signal?.addEventListener("abort", abort, { once: true });
@@ -113,13 +113,13 @@ export async function toWav(cfg: Pick<WhisperConfig, "ffmpegPath">, input: strin
 
 function helperEnv(): NodeJS.ProcessEnv {
 	const lib = path.join(helperHome(), "node_modules", `sherpa-onnx-${process.platform}-${process.arch}`);
-	return { ...process.env, MC_HOME: helperHome(), DYLD_LIBRARY_PATH: [lib, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(":") };
+	return { ...process.env, TAKE_NOTE_HOME: helperHome(), DYLD_LIBRARY_PATH: [lib, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(":") };
 }
 
 /** Voice fingerprint of a WAV file (used for voice samples). */
-export async function embedWav(sp: Pick<SpeakerConfig, "nodePath" | "helperScript">, wav: string): Promise<number[]> {
-	const { stdout } = await run(sp.nodePath, [sp.helperScript, "embed", wav], undefined, undefined, helperEnv());
-	return JSON.parse(stdout).embedding;
+export async function embedWav(sp: Pick<SpeakerConfig, "nodePath" | "helperSource">, wav: string): Promise<number[]> {
+	const { stdout } = await run(sp.nodePath, ["-e", sp.helperSource, "embed", wav], undefined, undefined, helperEnv());
+	return (JSON.parse(stdout) as { embedding: number[] }).embedding;
 }
 
 /**
@@ -136,7 +136,7 @@ export async function transcribeFile(
 	const problems = checkWhisperSetup(cfg);
 	if (problems.length) throw new Error(problems.join("; "));
 
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-copilot-"));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "take-note-"));
 	const wav = path.join(dir, "audio.wav");
 	const outBase = path.join(dir, "out");
 	try {
@@ -145,7 +145,7 @@ export async function transcribeFile(
 
 		// Speaker separation runs in parallel with Whisper (different CPU-bound processes).
 		const diarization = speakers
-			? run(speakers.nodePath, [speakers.helperScript, "diarize", wav, String(speakers.numSpeakers), String(speakers.clusterThreshold)], undefined, signal, helperEnv())
+			? run(speakers.nodePath, ["-e", speakers.helperSource, "diarize", wav, String(speakers.numSpeakers), String(speakers.clusterThreshold)], undefined, signal, helperEnv())
 					.then(({ stdout }) => JSON.parse(stdout) as { segments: DiarSegment[]; speakers: Record<string, SpeakerPrint> })
 					.catch((e: Error) => e)
 			: null;
@@ -179,13 +179,16 @@ export async function transcribeFile(
 			signal,
 		);
 
-		const json = JSON.parse(fs.readFileSync(outBase + ".json", "utf8"));
-		const whisper: WhisperSegment[] = (json.transcription ?? []).map((s: { offsets?: { from: number; to: number }; text: string }) => ({
+		const json = JSON.parse(fs.readFileSync(outBase + ".json", "utf8")) as {
+			transcription?: { offsets?: { from: number; to: number }; text: string }[];
+			result?: { language?: string };
+		};
+		const whisper: WhisperSegment[] = (json.transcription ?? []).map((s) => ({
 			from: s.offsets?.from ?? 0,
 			to: s.offsets?.to ?? 0,
 			text: s.text,
 		}));
-		language = language ?? json?.result?.language ?? null;
+		language = language ?? json.result?.language ?? null;
 
 		const result: TranscriptResult = { text: "", durationSec, language };
 

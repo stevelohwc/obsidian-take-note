@@ -1,5 +1,5 @@
 // Local storage for voice fingerprints and per-meeting speaker data.
-// Lives in ~/.meeting-copilot (this Mac only — never in the vault, so never in iCloud).
+// Lives in ~/.take-note (this Mac only — never in the vault, so never in iCloud).
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -8,7 +8,7 @@ import type { SpeakerPrint, VoiceProfiles } from "./speakers.ts";
 const MAX_PRINTS_PER_PERSON = 6;
 
 export function helperHome(): string {
-	return process.env.MC_HOME || path.join(os.homedir(), ".meeting-copilot");
+	return process.env.TAKE_NOTE_HOME || path.join(os.homedir(), ".take-note");
 }
 
 const voicesFile = () => path.join(helperHome(), "voices.json");
@@ -16,7 +16,7 @@ const sessionFile = (id: string) => path.join(helperHome(), "sessions", `${id.re
 
 export function loadVoices(): VoiceProfiles {
 	try {
-		const j = JSON.parse(fs.readFileSync(voicesFile(), "utf8"));
+		const j = JSON.parse(fs.readFileSync(voicesFile(), "utf8")) as { voices?: VoiceProfiles };
 		return j.voices ?? {};
 	} catch {
 		return {};
@@ -58,26 +58,10 @@ export function saveSession(id: string, s: Session) {
 
 export function loadSession(id: string): Session | null {
 	try {
-		return JSON.parse(fs.readFileSync(sessionFile(id), "utf8"));
+		return JSON.parse(fs.readFileSync(sessionFile(id), "utf8")) as Session;
 	} catch {
 		return null;
 	}
-}
-
-/**
- * The speaker helper ships inside main.js (so a plain GitHub-release install works) and is
- * written to ~/.meeting-copilot/speakers.cjs, next to the sherpa-onnx install it needs.
- */
-export function ensureHelperScript(source: string): string {
-	const file = path.join(helperHome(), "speakers.cjs");
-	try {
-		if (fs.readFileSync(file, "utf8") === source) return file;
-	} catch {
-		/* missing */
-	}
-	fs.mkdirSync(helperHome(), { recursive: true });
-	fs.writeFileSync(file, source);
-	return file;
 }
 
 /** Find a usable `node` binary (Obsidian's own PATH usually lacks Homebrew / nvm). */

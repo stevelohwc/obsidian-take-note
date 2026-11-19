@@ -10,11 +10,11 @@ import {
 	moment,
 } from "obsidian";
 import * as path from "path";
-import { DEFAULT_SETTINGS, MeetingCopilotSettingTab, MeetingCopilotSettings } from "./settings.ts";
+import { DEFAULT_SETTINGS, TakeNoteSettingTab, TakeNoteSettings } from "./settings.ts";
 import { MeetingRecorder } from "./recorder.ts";
 import { type SpeakerConfig, embedWav, toWav, transcribeFile } from "./transcribe.ts";
 import HELPER_SOURCE from "../helper/speakers.cjs";
-import { addVoice, ensureHelperScript, findNode, loadSession, loadVoices, newSessionId, saveSession, speakerSetupProblems } from "./voices.ts";
+import { addVoice, findNode, loadSession, loadVoices, newSessionId, saveSession, speakerSetupProblems } from "./voices.ts";
 import { renameSpeaker, transcriptSpeakers } from "./speakers.ts";
 import { NameSpeakersModal, VoiceSampleModal } from "./modals.ts";
 import * as fs from "fs";
@@ -38,6 +38,12 @@ import {
 } from "./render.ts";
 
 const AUDIO_EXT = ["webm", "m4a", "mp3", "wav", "ogg", "opus", "aac", "flac", "mp4", "mov", "mkv"];
+/** A frontmatter value that may be a list, a single value or missing, as strings. */
+function asList(v: unknown): string[] {
+	if (v === undefined || v === null || v === "") return [];
+	return (Array.isArray(v) ? v : [v]).map((x) => String(x).replace(/^#/, ""));
+}
+
 const DEFAULT_NAME = /^\d{4}-\d{2}-\d{2} – Meeting( \d{4})?( \d+)?$/;
 
 /** A Notice that stays up and can be updated, used for long jobs. */
@@ -74,8 +80,8 @@ class AudioPicker extends SuggestModal<TFile> {
 	}
 }
 
-export default class MeetingCopilot extends Plugin {
-	declare settings: MeetingCopilotSettings;
+export default class TakeNote extends Plugin {
+	declare settings: TakeNoteSettings;
 	private recorder = new MeetingRecorder();
 	private recording: { note: TFile; audioPath: string } | null = null;
 	private statusEl!: HTMLElement;
@@ -83,16 +89,18 @@ export default class MeetingCopilot extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		this.addSettingTab(new MeetingCopilotSettingTab(this.app, this));
+		this.addSettingTab(new TakeNoteSettingTab(this.app, this));
 
 		this.statusEl = this.addStatusBarItem();
-		this.statusEl.addClass("meeting-copilot-status");
-		this.statusEl.onClickEvent(() => this.recording && this.stopRecording());
+		this.statusEl.addClass("take-note-status");
+		this.statusEl.onClickEvent(() => {
+			if (this.recording) void this.stopRecording();
+		});
 		this.registerInterval(window.setInterval(() => this.updateStatus(), 1000));
 
-		this.addRibbonIcon("mic", "Meeting Copilot: start / stop recording", () => {
-			if (this.recording) this.stopRecording();
-			else this.startRecording(this.isMeetingNote(this.activeNote()) ? "current" : "new");
+		this.addRibbonIcon("mic", "Take Note: start / stop recording", () => {
+			if (this.recording) void this.stopRecording();
+			else void this.startRecording(this.isMeetingNote(this.activeNote()) ? "current" : "new");
 		});
 
 		this.addCommand({
@@ -108,7 +116,7 @@ export default class MeetingCopilot extends Plugin {
 			name: "Start recording in a new meeting note",
 			checkCallback: (checking) => {
 				if (this.recording) return false;
-				if (!checking) this.startRecording("new");
+				if (!checking) void this.startRecording("new");
 				return true;
 			},
 		});
@@ -117,7 +125,7 @@ export default class MeetingCopilot extends Plugin {
 			name: "Start recording in the current note",
 			checkCallback: (checking) => {
 				if (this.recording || !this.activeNote()) return false;
-				if (!checking) this.startRecording("current");
+				if (!checking) void this.startRecording("current");
 				return true;
 			},
 		});
@@ -126,7 +134,7 @@ export default class MeetingCopilot extends Plugin {
 			name: "Stop recording",
 			checkCallback: (checking) => {
 				if (!this.recording) return false;
-				if (!checking) this.stopRecording();
+				if (!checking) void this.stopRecording();
 				return true;
 			},
 		});
@@ -149,7 +157,7 @@ export default class MeetingCopilot extends Plugin {
 			checkCallback: (checking) => {
 				const f = this.activeNote();
 				if (!f) return false;
-				if (!checking) this.processNote(f);
+				if (!checking) void this.processNote(f);
 				return true;
 			},
 		});
@@ -159,7 +167,7 @@ export default class MeetingCopilot extends Plugin {
 			checkCallback: (checking) => {
 				const f = this.activeNote();
 				if (!f) return false;
-				if (!checking) this.transcribeEmbedded(f);
+				if (!checking) void this.transcribeEmbedded(f);
 				return true;
 			},
 		});
@@ -174,7 +182,7 @@ export default class MeetingCopilot extends Plugin {
 			checkCallback: (checking) => {
 				const f = this.activeNote();
 				if (!f) return false;
-				if (!checking) this.nameSpeakers(f);
+				if (!checking) void this.nameSpeakers(f);
 				return true;
 			},
 		});
@@ -190,26 +198,21 @@ export default class MeetingCopilot extends Plugin {
 				if (!this.jobs.size) return false;
 				if (!checking) {
 					this.jobs.forEach((c) => c.abort());
-					new Notice("Meeting Copilot: cancelled.");
+					new Notice("Take Note: cancelled.");
 				}
 				return true;
 			},
 		});
 	}
 
-	async onunload() {
+	onunload() {
 		this.jobs.forEach((c) => c.abort());
-		if (this.recording) {
-			try {
-				await this.recorder.stop(); // flush audio so nothing is lost
-			} catch {
-				/* best effort */
-			}
-		}
+		// Flush audio so nothing is lost (best effort).
+		if (this.recording) this.recorder.stop().catch(() => {});
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<TakeNoteSettings> | null);
 	}
 
 	/** data.json changed on disk (iCloud sync or an outside edit): reload so we never overwrite it with stale values. */
@@ -236,13 +239,12 @@ export default class MeetingCopilot extends Plugin {
 	private isMeetingNote(f: TFile | null): boolean {
 		if (!f) return false;
 		const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-		const tags: string[] = ([] as string[]).concat(fm?.tags ?? []);
-		return tags.some((t) => String(t).replace(/^#/, "") === "meeting") || f.path.startsWith(this.settings.meetingsFolder + "/");
+		return asList(fm?.tags).some((t) => t === "meeting") || f.path.startsWith(this.settings.meetingsFolder + "/");
 	}
 
 	private absPath(vaultPath: string): string {
 		const adapter = this.app.vault.adapter;
-		if (!(adapter instanceof FileSystemAdapter)) throw new Error("Meeting Copilot needs the desktop app.");
+		if (!(adapter instanceof FileSystemAdapter)) throw new Error("Take Note needs the desktop app.");
 		return adapter.getFullPath(normalizePath(vaultPath));
 	}
 
@@ -275,7 +277,8 @@ export default class MeetingCopilot extends Plugin {
 
 	private noteDate(f: TFile): string {
 		const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-		const fromFm = String(fm?.created ?? fm?.date ?? "").match(/\d{4}-\d{2}-\d{2}/);
+		const raw: unknown = fm?.created ?? fm?.date;
+		const fromFm = (typeof raw === "string" ? raw : "").match(/\d{4}-\d{2}-\d{2}/);
 		if (fromFm) return fromFm[0];
 		const fromName = f.basename.match(/\d{4}-\d{2}-\d{2}/);
 		return fromName ? fromName[0] : moment().format("YYYY-MM-DD");
@@ -298,7 +301,7 @@ export default class MeetingCopilot extends Plugin {
 		for (let i = 0; i < 20; i++) {
 			const f = this.app.vault.getAbstractFileByPath(vaultPath);
 			if (f instanceof TFile) return f;
-			await new Promise((r) => setTimeout(r, 250));
+			await new Promise((r) => window.setTimeout(r, 250));
 		}
 		return null;
 	}
@@ -313,7 +316,7 @@ export default class MeetingCopilot extends Plugin {
 		if (!nodePath || speakerSetupProblems(nodePath).length) return null;
 		return {
 			nodePath,
-			helperScript: ensureHelperScript(HELPER_SOURCE),
+			helperSource: HELPER_SOURCE,
 			numSpeakers: s.numSpeakers,
 			clusterThreshold: s.clusterThreshold,
 			mergeThreshold: s.mergeThreshold,
@@ -375,14 +378,13 @@ export default class MeetingCopilot extends Plugin {
 			new Notice("Speaker setup incomplete: " + problems.join("; "), 10000);
 			return;
 		}
-		const helperScript = ensureHelperScript(HELPER_SOURCE);
 		new VoiceSampleModal(this.app, this.knownPeople(), this.settings.micDeviceId, async (name, file) => {
-			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-copilot-voice-"));
+			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "take-note-voice-"));
 			try {
 				const wav = path.join(dir, "voice.wav");
 				const secs = await toWav(this.settings, file, wav);
 				if (secs < 5) throw new Error("Sample too short — record at least 10 seconds.");
-				addVoice(name, await embedWav({ nodePath, helperScript }, wav));
+				addVoice(name, await embedWav({ nodePath, helperSource: HELPER_SOURCE }, wav));
 				new Notice(`✅ Saved ${name}'s voice. They'll be named automatically in future transcripts.`, 8000);
 			} finally {
 				fs.rmSync(dir, { recursive: true, force: true });
@@ -402,13 +404,16 @@ export default class MeetingCopilot extends Plugin {
 			if (!name || /^speaker \d+$/i.test(name) || name.toLowerCase() === me) continue;
 			const summary = p.summary || p.commitments[0] || p.updates[0] || "attended";
 			const existing = people.get(name.toLowerCase());
-			let file = existing ? this.app.vault.getAbstractFileByPath(`${folder}/${existing}.md`) : null;
-			if (!(file instanceof TFile)) {
+			const found = existing ? this.app.vault.getAbstractFileByPath(`${folder}/${existing}.md`) : null;
+			let file: TFile;
+			if (found instanceof TFile) {
+				file = found;
+			} else {
 				if (!this.settings.createPeopleNotes) continue;
 				await this.ensureFolder(folder);
 				file = await this.app.vault.create(`${folder}/${name}.md`, `---\ntags: [person]\nrole:\n---\n\n# ${name}\n\n## Notes\n`);
 			}
-			await this.app.vault.process(file as TFile, (c) => upsertPersonLine(c, note.basename, summary));
+			await this.app.vault.process(file, (c) => upsertPersonLine(c, note.basename, summary));
 			updated++;
 		}
 		if (updated) new Notice(`👥 Updated ${updated} People note${updated === 1 ? "" : "s"}.`);
@@ -499,12 +504,12 @@ export default class MeetingCopilot extends Plugin {
 			return;
 		}
 		const go = (f: TFile) => this.transcribe(note, f.path, "!" + this.app.fileManager.generateMarkdownLink(f, note.path));
-		if (unique.length === 1) go(unique[0]);
-		else new AudioPicker(this, unique, go).open();
+		if (unique.length === 1) void go(unique[0]);
+		else new AudioPicker(this, unique, (f) => void go(f)).open();
 	}
 
 	private importRecording() {
-		const input = document.createElement("input");
+		const input = createEl("input");
 		input.type = "file";
 		input.accept = "audio/*,video/*," + AUDIO_EXT.map((e) => "." + e).join(",");
 		input.onchange = async () => {
@@ -513,8 +518,8 @@ export default class MeetingCopilot extends Plugin {
 			// Electron: get the real path so large videos are never copied into the vault.
 			let filePath = "";
 			try {
-				// eslint-disable-next-line @typescript-eslint/no-var-requires
-				filePath = require("electron").webUtils?.getPathForFile?.(file) ?? "";
+				const electron = require("electron") as { webUtils?: { getPathForFile?: (f: File) => string } };
+				filePath = electron.webUtils?.getPathForFile?.(file) ?? "";
 			} catch {
 				/* older Electron */
 			}
@@ -599,7 +604,7 @@ export default class MeetingCopilot extends Plugin {
 	async processNote(note: TFile) {
 		const apiKey = this.getApiKey(); // may be empty for local servers (Ollama, LM Studio)
 		if (!this.settings.model || !this.settings.baseUrl) {
-			new Notice("Set your LLM server and model in Settings → Meeting Copilot first (click Test to list models).", 10000);
+			new Notice("Set your LLM server and model in Settings → Take Note first (click Test to list models).", 10000);
 			return;
 		}
 		if (this.jobs.has(note.path)) {
@@ -649,12 +654,12 @@ export default class MeetingCopilot extends Plugin {
 				model: s.model,
 			});
 			await this.app.vault.process(note, (c) => upsertBlock(c, AI_START, AI_END, md, "afterTitle"));
-			await this.app.fileManager.processFrontMatter(note, (fm) => {
-				const tags = new Set<string>(([] as string[]).concat(fm.tags ?? []).map(String));
+			await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
+				const tags = new Set<string>(asList(fm.tags));
 				tags.add("meeting");
 				fm.tags = [...tags];
 				if (!fm.created) fm.created = this.noteDate(note);
-				const people = new Set<string>(([] as string[]).concat(fm.people ?? []).map(String));
+				const people = new Set<string>(asList(fm.people));
 				result.attendees.filter((a) => !/^(speaker \d+|unknown)$/i.test(a)).forEach((a) => people.add(a));
 				fm.people = [...people];
 			});

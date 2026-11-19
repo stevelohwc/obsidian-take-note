@@ -1,11 +1,11 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
-import type MeetingCopilot from "./main.ts";
+import type TakeNote from "./main.ts";
 import { listModels } from "./llm.ts";
 import { listInputDevices } from "./recorder.ts";
 import { checkWhisperSetup } from "./transcribe.ts";
 import { findNode, forgetVoice, loadVoices, speakerSetupProblems } from "./voices.ts";
 
-export interface MeetingCopilotSettings {
+export interface TakeNoteSettings {
 	// LLM
 	baseUrl: string;
 	apiKeySecret: string; // id in Obsidian's keychain-backed secret storage
@@ -42,7 +42,7 @@ export interface MeetingCopilotSettings {
 	timestamps: boolean;
 }
 
-export const DEFAULT_SETTINGS: MeetingCopilotSettings = {
+export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	baseUrl: "http://localhost:11434/v1",
 	apiKeySecret: "",
 	model: "",
@@ -75,8 +75,8 @@ export const DEFAULT_SETTINGS: MeetingCopilotSettings = {
 	timestamps: true,
 };
 
-export class MeetingCopilotSettingTab extends PluginSettingTab {
-	constructor(app: App, private plugin: MeetingCopilot) {
+export class TakeNoteSettingTab extends PluginSettingTab {
+	constructor(app: App, private plugin: TakeNote) {
 		super(app, plugin);
 	}
 
@@ -178,7 +178,7 @@ export class MeetingCopilotSettingTab extends PluginSettingTab {
 						await save();
 					});
 				t.inputEl.rows = 4;
-				t.inputEl.style.width = "100%";
+				t.inputEl.addClass("take-note-wide");
 			});
 
 		new Setting(containerEl).setName("Notes").setHeading();
@@ -284,7 +284,6 @@ export class MeetingCopilotSettingTab extends PluginSettingTab {
 				sl
 					.setLimits(0.3, 0.9, 0.05)
 					.setValue(s.matchThreshold)
-					.setDynamicTooltip()
 					.onChange(async (v) => {
 						s.matchThreshold = v;
 						await save();
@@ -298,7 +297,6 @@ export class MeetingCopilotSettingTab extends PluginSettingTab {
 				sl
 					.setLimits(0.4, 0.95, 0.05)
 					.setValue(s.clusterThreshold)
-					.setDynamicTooltip()
 					.onChange(async (v) => {
 						s.clusterThreshold = v;
 						await save();
@@ -320,7 +318,7 @@ export class MeetingCopilotSettingTab extends PluginSettingTab {
 			.setName("Saved voices")
 			.setDesc(
 				voices.length
-					? `${voices.join(", ")}. Stored only on this Mac in ~/.meeting-copilot/voices.json.`
+					? `${voices.join(", ")}. Stored only on this Mac in ~/.take-note/voices.json.`
 					: "None yet. Use \"Record a voice sample\" or \"Name the speakers in this note\" to add people.",
 			)
 			.addButton((b) =>
@@ -400,7 +398,7 @@ export class MeetingCopilotSettingTab extends PluginSettingTab {
 						await save();
 					});
 				t.inputEl.rows = 2;
-				t.inputEl.style.width = "100%";
+				t.inputEl.addClass("take-note-wide");
 			});
 
 		new Setting(containerEl)
@@ -412,7 +410,7 @@ export class MeetingCopilotSettingTab extends PluginSettingTab {
 				}),
 			);
 
-		const paths: [keyof MeetingCopilotSettings, string, string][] = [
+		const paths: [keyof TakeNoteSettings, string, string][] = [
 			["ffmpegPath", "ffmpeg path", ""],
 			["whisperPath", "whisper-cli path", ""],
 			["modelPath", "Whisper model", "ggml model file. large-v3-turbo-q5_0 is a good speed/quality balance."],

@@ -1,6 +1,6 @@
-# Meeting Copilot for Obsidian
+# Take Note
 
-Nobody wants to take notes in meetings. Meeting Copilot records the meeting in Obsidian,
+Nobody wants to take notes in meetings. Take Note records the meeting in Obsidian,
 transcribes it **on your own computer** with Whisper, works out **who said what**, and has
 an LLM of your choice turn it into a structured meeting note:
 
@@ -35,9 +35,26 @@ Ran the sync and approved the release plan.
   (Ollama, LM Studio) and nothing leaves your machine at all.
 - Your API key is stored in your system keychain through Obsidian's secret storage, not in
   the vault.
-- Voice fingerprints are stored in `~/.meeting-copilot/` on your computer, outside the vault,
+- Voice fingerprints are stored in `~/.take-note/` on your computer, outside the vault,
   so they never sync. You can forget a voice from the settings at any time.
 - Recording people may require their consent where you live. Tell people you are recording.
+
+### Disclosures
+
+As required by Obsidian's developer policies:
+
+- **Network use.** The plugin only connects to the LLM server you set in **API base URL**,
+  to list models and send your meeting text. It sends no telemetry and has no ads. The
+  optional `scripts/setup-macos.sh` (which you run yourself, not the plugin) downloads
+  Homebrew packages, the Whisper model from Hugging Face, and sherpa-onnx from npm and GitHub.
+- **Files outside your vault.** It reads and writes `~/.take-note/` (speaker-separation
+  runtime and models installed by the setup script, voice fingerprints, per-meeting speaker
+  data), reads the Whisper model you configure (default `~/.cache/whisper/`), uses temporary
+  files in your system temp folder while transcribing, and reads recordings you import.
+- **Local programs.** It runs `ffmpeg`, `whisper-cli` and `node` from the paths in settings
+  to convert, transcribe and separate speakers. It does not install or update anything itself.
+- **Microphone.** Used only while you are recording.
+- **Desktop only.** Needs the desktop app for the microphone, file system and local programs.
 
 ## Requirements
 
@@ -59,19 +76,19 @@ Ran the sync and approved the release plan.
 
    This installs `ffmpeg` and `whisper.cpp` with Homebrew, downloads the multilingual
    Whisper model `large-v3-turbo-q5_0` (~574 MB), and installs sherpa-onnx plus two small
-   speaker models (~80 MB) into `~/.meeting-copilot`. Add `--no-speakers` to skip speaker
+   speaker models (~80 MB) into `~/.take-note`. Add `--no-speakers` to skip speaker
    separation.
 
 2. **The plugin.** Either:
    - **Manual:** download `main.js`, `manifest.json` and `styles.css` from the
-     [latest release](https://github.com/stevelohwc/obsidian-meeting-copilot/releases/latest)
-     into `<your vault>/.obsidian/plugins/meeting-copilot/`, or
+     [latest release](https://github.com/stevelohwc/obsidian-take-note/releases/latest)
+     into `<your vault>/.obsidian/plugins/take-note/`, or
    - **BRAT:** install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin and add
-     `stevelohwc/obsidian-meeting-copilot`.
+     `stevelohwc/obsidian-take-note`.
 
-   Then reload Obsidian and enable **Meeting Copilot** in Settings → Community plugins.
+   Then reload Obsidian and enable **Take Note** in Settings → Community plugins.
 
-3. **Settings → Meeting Copilot**
+3. **Settings → Take Note**
    - **API base URL**: e.g. `http://localhost:11434/v1` for Ollama.
    - **API key**: only if your server needs one.
    - **Model**: click **Test** to list the models your server offers.
@@ -90,7 +107,7 @@ Ran the sync and approved the release plan.
 | Process a recording file | **Import a recording…** (audio or video; it is not copied into the vault) |
 | Re-run after editing your notes | Run **Summarize & extract…** again. It only replaces the AI section. |
 
-All commands are in the command palette (Cmd/Ctrl+P) under "Meeting Copilot". You can assign
+All commands are in the command palette (Cmd/Ctrl+P) under "Take Note". You can assign
 hotkeys to Start / Stop recording.
 
 ### Who said what

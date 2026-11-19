@@ -7,8 +7,8 @@
 //   LLM_MODEL      model name (required)
 //   LLM_API_KEY    API key, if your server needs one
 //   MY_NAME        your name, so "I will…" becomes your action item
-//   MC_DATA        path to a vault's .obsidian/plugins/meeting-copilot/data.json to reuse its settings
-//   MC_SPEAKERS=1  separate speakers (needs scripts/setup-macos.sh)
+//   TAKE_NOTE_DATA        path to a vault's .obsidian/plugins/take-note/data.json to reuse its settings
+//   TAKE_NOTE_SPEAKERS=1  separate speakers (needs scripts/setup-macos.sh)
 //   TRANSCRIPT_ONLY=1  print the transcript and stop
 import fs from "node:fs";
 import path from "node:path";
@@ -20,7 +20,7 @@ import { findNode, loadVoices } from "../src/voices.ts";
 
 const dotenv = fs.existsSync(".env") ? fs.readFileSync(".env", "utf8") : "";
 const env = (k: string) => process.env[k] ?? dotenv.match(new RegExp(`^${k}=(.*)$`, "m"))?.[1]?.trim();
-const saved = env("MC_DATA") && fs.existsSync(env("MC_DATA")!) ? JSON.parse(fs.readFileSync(env("MC_DATA")!, "utf8")) : {};
+const saved = env("TAKE_NOTE_DATA") && fs.existsSync(env("TAKE_NOTE_DATA")!) ? JSON.parse(fs.readFileSync(env("TAKE_NOTE_DATA")!, "utf8")) : {};
 
 const baseUrl = env("LLM_BASE_URL") ?? saved.baseUrl ?? "http://localhost:11434/v1";
 const model = env("LLM_MODEL") ?? saved.model ?? "";
@@ -50,10 +50,10 @@ if (/\.(md|txt)$/i.test(input)) {
 		},
 		(p, s) => process.stderr.write(`\r${s} ${p}%   `),
 		undefined,
-		env("MC_SPEAKERS")
+		env("TAKE_NOTE_SPEAKERS")
 			? {
 					nodePath: findNode("")!,
-					helperScript: path.resolve("helper/speakers.cjs"),
+					helperSource: fs.readFileSync("helper/speakers.cjs", "utf8"),
 					numSpeakers: 0,
 					clusterThreshold: 0.7,
 					mergeThreshold: 0.75,

@@ -48,7 +48,7 @@ test("chunkText respects the token budget", () => {
 test("upsertBlock inserts after H1 then replaces in place", () => {
 	const note = "---\ntags: [meeting]\n---\n# 2026-11-19 – Meeting 1530\n\n## My notes\n- hello\n";
 	const once = upsertBlock(note, AI_START, AI_END, `${AI_START}\nA\n${AI_END}`, "afterTitle");
-	assert.match(once, /# 2026-11-19 – Meeting 1530\n\n<!-- meeting-copilot:ai:start -->\nA\n<!-- meeting-copilot:ai:end -->\n\n## My notes/);
+	assert.match(once, /# 2026-11-19 – Meeting 1530\n\n<!-- take-note:ai:start -->\nA\n<!-- take-note:ai:end -->\n\n## My notes/);
 	const twice = upsertBlock(once, AI_START, AI_END, `${AI_START}\nB\n${AI_END}`, "afterTitle");
 	assert.ok(twice.includes("\nB\n") && !twice.includes("\nA\n"));
 	assert.equal(twice.split(AI_START).length, 2);
