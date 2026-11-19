@@ -43,19 +43,19 @@
 .take-note-fab-button .svg-icon { width: 38px; height: 38px; overflow: visible; }
 
 /* Mascot colours inside the button: a cream mic with a little face and rosy cheeks. */
-.take-note-fab .tn-body { fill: #f6efe3; }
-.take-note-fab .tn-stand { stroke: var(--text-muted); }
-.take-note-fab .tn-face { fill: #3a3330; }
-.take-note-fab .tn-face-line { stroke: #3a3330; }
-.take-note-fab .tn-cheek { display: inline; fill: #f4a3a8; opacity: 0.85; }
-.take-note-fab .tn-shine { display: inline; fill: #ffffff; }
-.take-note-fab .tn-wave { stroke: var(--color-red); }
-.take-note-fab .tn-sparkle { fill: var(--color-yellow); }
+.take-note-mood .tn-body { fill: #f6efe3; }
+.take-note-mood .tn-stand { stroke: var(--text-muted); }
+.take-note-mood .tn-face { fill: #3a3330; }
+.take-note-mood .tn-face-line { stroke: #3a3330; }
+.take-note-mood .tn-cheek { display: inline; fill: #f4a3a8; opacity: 0.85; }
+.take-note-mood .tn-shine { display: inline; fill: #ffffff; }
+.take-note-mood .tn-wave { stroke: var(--color-red); }
+.take-note-mood .tn-sparkle { fill: var(--color-yellow); }
 
-.take-note-fab[data-mood="recording"] .tn-body { fill: #ff8a8a; }
+.take-note-mood[data-mood="recording"] .tn-body { fill: #ff8a8a; }
 .take-note-fab[data-mood="recording"] .take-note-fab-button { border-color: var(--color-red); }
-.take-note-fab[data-mood="busy"] .tn-body { fill: #c9b8ff; }
-.take-note-fab[data-mood="paused"] .tn-body { fill: #e8e0d2; }
+.take-note-mood[data-mood="busy"] .tn-body { fill: #c9b8ff; }
+.take-note-mood[data-mood="paused"] .tn-body { fill: #e8e0d2; }
 
 .take-note-fab-label {
 	order: -1;
@@ -88,3 +88,55 @@
 @media (prefers-reduced-motion: reduce) {
 	.take-note-fab * { animation: none !important; }
 }
+
+/* ---------- Sidebar ---------- */
+.take-note-side { padding: 0 !important; display: flex; flex-direction: column; }
+.take-note-side-status {
+	display: flex; align-items: center; gap: 8px;
+	padding: 10px 12px; border-bottom: 1px solid var(--background-modifier-border);
+	position: sticky; top: 0; z-index: 1; background: var(--background-secondary);
+}
+.take-note-side-face { width: 34px; height: 34px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--background-secondary-alt); }
+.take-note-side-face .svg-icon { width: 26px; height: 26px; }
+.take-note-side-status-text { flex: 1; min-width: 0; }
+.take-note-side-status-main { font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
+.take-note-side-status-sub { font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.take-note-side-status[data-mood="recording"] .take-note-side-status-main { color: var(--color-red); }
+.take-note-side-toolbar { display: flex; gap: 2px; }
+.take-note-side-toolbar .is-disabled { opacity: 0.35; pointer-events: none; }
+.take-note-side-body { padding: 10px 12px 24px; }
+.take-note-side-title { font-weight: var(--font-bold); font-size: var(--font-ui-medium); margin-bottom: 8px; cursor: pointer; overflow-wrap: anywhere; }
+.take-note-side-title:hover { color: var(--text-accent); }
+.take-note-side-tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--background-modifier-border); }
+.take-note-side-tab { padding: 4px 10px; cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: var(--font-ui-small); }
+.take-note-side-tab:hover { color: var(--text-normal); }
+.take-note-side-tab.is-active { color: var(--text-normal); border-bottom-color: var(--interactive-accent); }
+.take-note-side-summary { font-size: var(--font-ui-small); }
+.take-note-side-summary .callout { margin: 8px 0; }
+.take-note-side-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; color: var(--text-muted); padding: 24px 8px; }
+.take-note-side-empty-face .svg-icon { width: 56px; height: 56px; }
+.take-note-side-empty button { display: inline-flex; gap: 6px; align-items: center; }
+.take-note-side-empty button .svg-icon { width: 14px; height: 14px; }
+.take-note-side-audio { width: 100%; margin-bottom: 8px; }
+.take-note-side-tools { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.take-note-side-tools input { width: 100%; }
+.take-note-side-meta { font-size: var(--font-ui-smaller); color: var(--text-faint); }
+.take-note-side-lines { display: flex; flex-direction: column; gap: 2px; }
+.take-note-side-line { display: flex; gap: 8px; padding: 4px 6px; border-radius: var(--radius-s); font-size: var(--font-ui-small); line-height: 1.45; }
+.take-note-side-line:hover { background: var(--background-modifier-hover); }
+.take-note-side-line.is-playing { background: var(--background-modifier-active-hover); }
+.take-note-side-time {
+	flex: none; padding: 0 4px; height: auto; box-shadow: none; background: none; border: none;
+	font-size: var(--font-ui-smaller); font-variant-numeric: tabular-nums; color: var(--text-faint); cursor: pointer;
+}
+.take-note-side-time:hover:not(:disabled) { color: var(--text-accent); background: none; }
+.take-note-side-time:disabled { cursor: default; }
+.take-note-side-text { min-width: 0; overflow-wrap: anywhere; }
+.take-note-side-speaker { font-weight: var(--font-semibold); margin-right: 6px; }
+.take-note-spk-0 { color: var(--color-blue); }
+.take-note-spk-1 { color: var(--color-orange); }
+.take-note-spk-2 { color: var(--color-green); }
+.take-note-spk-3 { color: var(--color-purple); }
+.take-note-spk-4 { color: var(--color-pink); }
+.take-note-spk-5 { color: var(--color-cyan); }
+.take-note-side-none { color: var(--text-muted); padding: 8px; }

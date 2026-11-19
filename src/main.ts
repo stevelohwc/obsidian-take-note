@@ -22,7 +22,8 @@ import * as fs from "fs";
 import * as os from "os";
 import { PROVIDERS, type ProviderId, inferProvider, providerChat } from "./providers.ts";
 import { FloatingButton } from "./fab.ts";
-import { MASCOT_ICON, registerMascotIcons } from "./mascot.ts";
+import { MASCOT_ICON, type Mood, registerMascotIcons } from "./mascot.ts";
+import { TakeNoteView, VIEW_TYPE } from "./view.ts";
 import { extractMeeting, type MeetingNotes } from "./extract.ts";
 import {
 	AI_END,
@@ -88,7 +89,7 @@ export default class TakeNote extends Plugin {
 	private recorder = new MeetingRecorder();
 	private recording: { note: TFile; audioPath: string } | null = null;
 	private statusEl!: HTMLElement;
-	private jobs = new Map<string, AbortController>(); // note path -> running job
+	private jobs = new Map<TFile, AbortController>(); // note -> running job (the TFile survives renames; its path does not)
 	private fab: FloatingButton | null = null;
 	private busyText = "Working…";
 
@@ -105,7 +106,20 @@ export default class TakeNote extends Plugin {
 
 		registerMascotIcons();
 		this.addRibbonIcon(MASCOT_ICON.idle, "Take Note: start / stop recording", () => this.toggleRecording());
-		this.app.workspace.onLayoutReady(() => this.refreshFloatingButton());
+		this.registerView(VIEW_TYPE, (leaf) => new TakeNoteView(leaf, this));
+		this.app.workspace.onLayoutReady(() => {
+			this.refreshFloatingButton();
+			if (!this.settings.sidebarAdded) {
+				this.settings.sidebarAdded = true;
+				void this.saveSettings();
+				void this.openSidebar(false);
+			}
+		});
+		this.addCommand({
+			id: "open-sidebar",
+			name: "Open the sidebar (summary & transcript)",
+			callback: () => void this.openSidebar(true),
+		});
 		this.registerDomEvent(window, "resize", () => this.fab?.clamp());
 
 		this.addCommand({
@@ -265,21 +279,14 @@ export default class TakeNote extends Plugin {
 		const note = this.activeNote();
 		const add = (title: string, icon: string, run: () => void) => menu.addItem((i) => i.setTitle(title).setIcon(icon).onClick(run));
 		if (this.recording) {
-			add(this.recorder.isPaused ? "Resume recording" : "Pause recording", this.recorder.isPaused ? "play" : "pause", () => {
-				if (this.recorder.isPaused) this.recorder.resume();
-				else this.recorder.pause();
-				this.updateStatus();
-			});
+			add(this.recorder.isPaused ? "Resume recording" : "Pause recording", this.recorder.isPaused ? "play" : "pause", () => this.togglePause());
 			add("Stop recording", "square", () => void this.stopRecording());
 		} else {
 			add("Record in a new meeting note", "mic", () => void this.startRecording("new"));
 			if (note) add("Record in this note", "file-audio", () => void this.startRecording("current"));
 		}
 		if (this.jobs.size) {
-			add("Cancel the running job", "x", () => {
-				this.jobs.forEach((c) => c.abort());
-				new Notice("Take Note: cancelled.");
-			});
+			add("Cancel the running job", "x", () => this.cancelJobs());
 		}
 		menu.addSeparator();
 		if (note) {
@@ -287,6 +294,7 @@ export default class TakeNote extends Plugin {
 			add("Transcribe audio in this note", "audio-lines", () => void this.transcribeEmbedded(note));
 			add("Name the speakers", "users", () => void this.nameSpeakers(note));
 		}
+		add("Open the sidebar", "panel-right", () => void this.openSidebar(true));
 		add("Import a recording…", "upload", () => this.importRecording());
 		add("New meeting note", "file-plus", () => {
 			void this.createMeetingNote().then((f) => this.openNote(f));
@@ -301,7 +309,48 @@ export default class TakeNote extends Plugin {
 		menu.showAtMouseEvent(evt);
 	}
 
-	private toggleRecording() {
+	/** Show the sidebar, creating it in the right sidebar if needed. */
+	async openSidebar(reveal: boolean) {
+		let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+		if (!leaf) {
+			const right = this.app.workspace.getRightLeaf(false);
+			if (!right) return;
+			await right.setViewState({ type: VIEW_TYPE, active: reveal });
+			leaf = right;
+		}
+		if (reveal) await this.app.workspace.revealLeaf(leaf);
+	}
+
+	private sidebarViews(): TakeNoteView[] {
+		return this.app.workspace
+			.getLeavesOfType(VIEW_TYPE)
+			.map((l) => l.view)
+			.filter((v): v is TakeNoteView => v instanceof TakeNoteView);
+	}
+
+	/** What the plugin is doing right now, for the button and the sidebar. */
+	status(): { mood: Mood; text: string; recordingNote: TFile | null } {
+		if (this.recording) {
+			const paused = this.recorder.isPaused;
+			return { mood: paused ? "paused" : "recording", text: `${paused ? "Paused" : "Recording"} ${formatClock(this.recorder.elapsedMs)}`, recordingNote: this.recording.note };
+		}
+		if (this.jobs.size) return { mood: "busy", text: this.busyText, recordingNote: null };
+		return { mood: "idle", text: "Ready to take notes", recordingNote: null };
+	}
+
+	togglePause() {
+		if (!this.recording) return;
+		if (this.recorder.isPaused) this.recorder.resume();
+		else this.recorder.pause();
+		this.updateStatus();
+	}
+
+	cancelJobs() {
+		this.jobs.forEach((c) => c.abort());
+		new Notice("Take Note: cancelled.");
+	}
+
+	toggleRecording() {
 		if (this.recording) void this.stopRecording();
 		else void this.startRecording(this.isMeetingNote(this.activeNote()) ? "current" : "new");
 	}
@@ -312,6 +361,7 @@ export default class TakeNote extends Plugin {
 		this.statusEl.setText(short);
 		this.statusEl.show();
 		this.fab?.set("busy", text, true);
+		this.sidebarViews().forEach((v) => v.updateStatus());
 	}
 
 	/** data.json changed on disk (iCloud sync or an outside edit): reload so we never overwrite it with stale values. */
@@ -335,7 +385,7 @@ export default class TakeNote extends Plugin {
 		return f && f.extension === "md" ? f : null;
 	}
 
-	private isMeetingNote(f: TFile | null): boolean {
+	isMeetingNote(f: TFile | null): boolean {
 		if (!f) return false;
 		const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
 		return asList(fm?.tags).some((t) => t === "meeting") || f.path.startsWith(this.settings.meetingsFolder + "/");
@@ -398,6 +448,7 @@ export default class TakeNote extends Plugin {
 		} else {
 			this.fab?.set("busy", this.busyText, true);
 		}
+		this.sidebarViews().forEach((v) => v.updateStatus());
 	}
 
 	private async waitForFile(vaultPath: string): Promise<TFile | null> {
@@ -428,7 +479,7 @@ export default class TakeNote extends Plugin {
 		};
 	}
 
-	private async nameSpeakers(note: TFile) {
+	async nameSpeakers(note: TFile) {
 		const content = await this.app.vault.read(note);
 		const block = getBlock(content, TX_START, TX_END);
 		const session = speakerSessionId(content);
@@ -596,7 +647,7 @@ export default class TakeNote extends Plugin {
 
 	// ---------- transcription ----------
 
-	private async transcribeEmbedded(note: TFile) {
+	async transcribeEmbedded(note: TFile) {
 		const cache = this.app.metadataCache.getFileCache(note);
 		const audios = (cache?.embeds ?? [])
 			.map((e) => this.app.metadataCache.getFirstLinkpathDest(e.link.split("#")[0], note.path))
@@ -644,12 +695,12 @@ export default class TakeNote extends Plugin {
 	 * then run the AI if enabled.
 	 */
 	async transcribe(note: TFile, audio: string, audioLink: string, external = false) {
-		if (this.jobs.has(note.path)) {
+		if (this.jobs.has(note)) {
 			new Notice("This note is already being processed.");
 			return;
 		}
 		const ctrl = new AbortController();
-		this.jobs.set(note.path, ctrl);
+		this.jobs.set(note, ctrl);
 		const progress = new Progress("🎙️ Preparing transcription…");
 		this.showBusy("Transcribing…", "🎙️");
 		const started = Date.now();
@@ -696,7 +747,7 @@ export default class TakeNote extends Plugin {
 			progress.done("❌ Transcription failed: " + (e as Error).message, 15000);
 			return;
 		} finally {
-			this.jobs.delete(note.path);
+			this.jobs.delete(note);
 			this.updateStatus();
 		}
 		if (this.settings.autoProcess) await this.processNote(note);
@@ -715,7 +766,7 @@ export default class TakeNote extends Plugin {
 			new Notice(`Add your ${provider.name} API key in Settings → Take Note first.`, 10000);
 			return;
 		}
-		if (this.jobs.has(note.path)) {
+		if (this.jobs.has(note)) {
 			new Notice("This note is already being processed.");
 			return;
 		}
@@ -727,7 +778,7 @@ export default class TakeNote extends Plugin {
 		}
 
 		const ctrl = new AbortController();
-		this.jobs.set(note.path, ctrl);
+		this.jobs.set(note, ctrl);
 		const s = this.settings;
 		const progress = new Progress("🧠 Sending to " + s.model + "…");
 		this.showBusy("Thinking…", "🧠 AI…");
@@ -787,7 +838,7 @@ export default class TakeNote extends Plugin {
 		} catch (e) {
 			progress.done("❌ AI step failed: " + (e as Error).message, 15000);
 		} finally {
-			this.jobs.delete(note.path);
+			this.jobs.delete(note);
 			this.updateStatus();
 		}
 	}

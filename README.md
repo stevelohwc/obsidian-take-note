@@ -112,6 +112,11 @@ As required by Obsidian's developer policies:
 | Process a recording file | **Import a recording…** (audio or video; it is not copied into the vault) |
 | Re-run after editing your notes | Run **Summarize & extract…** again. It only replaces the AI section. |
 
+**Sidebar:** the Take Note panel in the right sidebar follows the meeting note you have open.
+**Summary** shows the AI notes (tick tasks right there), **Transcript** shows who said what with
+a search box, and clicking a timestamp plays the recording from that moment. Its toolbar records,
+summarizes, transcribes and names speakers. Reopen it with **Open the sidebar** if you close it.
+
 The floating mic button changes face while it listens, pauses and thinks. Right-click it for
 more actions, drag it anywhere, or hide it in settings.
 
@@ -152,6 +157,7 @@ that device under Settings → Microphone.
 | `src/llm.ts` | Streaming client for any OpenAI-compatible `/chat/completions` |
 | `src/claude.ts` | Claude through the official Anthropic SDK, streaming |
 | `src/fab.ts`, `src/mascot.ts` | The floating mic button and its mascot |
+| `src/view.ts`, `src/sidebar-data.ts` | The sidebar: summary, transcript, audio player |
 | `src/extract.ts` | The prompt, JSON parsing, splitting long meetings and merging, priority checks |
 | `src/render.ts` | The Markdown written into your note |
 

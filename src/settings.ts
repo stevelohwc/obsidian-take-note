@@ -20,6 +20,8 @@ export interface TakeNoteSettings {
 	// Floating button
 	showFloatingButton: boolean;
 	floatingButtonPos: { right: number; bottom: number } | null;
+	/** The sidebar is added once on first run; if you close it, it stays closed. */
+	sidebarAdded: boolean;
 	// Notes
 	meetingsFolder: string;
 	peopleFolder: string;
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	providerMemory: {},
 	showFloatingButton: true,
 	floatingButtonPos: null,
+	sidebarAdded: false,
 	meetingsFolder: "Meetings",
 	peopleFolder: "People",
 	linkPeople: true,

@@ -27,7 +27,7 @@ export class FloatingButton {
 			onMoved: (pos: FabPosition) => void;
 		},
 	) {
-		this.el = host.createDiv({ cls: "take-note-fab" });
+		this.el = host.createDiv({ cls: "take-note-fab take-note-mood" });
 		this.label = this.el.createDiv({ cls: "take-note-fab-label" });
 		this.button = this.el.createEl("button", { cls: "take-note-fab-button", attr: { "aria-label": "Take Note" } });
 		this.pos = pos ?? DEFAULT_POS;
