@@ -87,7 +87,8 @@ class AudioPicker extends SuggestModal<TFile> {
 export default class TakeNote extends Plugin {
 	declare settings: TakeNoteSettings;
 	private recorder = new MeetingRecorder();
-	private recording: { note: TFile; audioPath: string } | null = null;
+	/** `fresh` is the note's text when recording created it, so an untouched note can be removed again. */
+	private recording: { note: TFile; audioPath: string; fresh: string | null } | null = null;
 	private statusEl!: HTMLElement;
 	private jobs = new Map<TFile, AbortController>(); // note -> running job (the TFile survives renames; its path does not)
 	private fab: FloatingButton | null = null;
@@ -109,11 +110,8 @@ export default class TakeNote extends Plugin {
 		this.registerView(VIEW_TYPE, (leaf) => new TakeNoteView(leaf, this));
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshFloatingButton();
-			if (!this.settings.sidebarAdded) {
-				this.settings.sidebarAdded = true;
-				void this.saveSettings();
-				void this.openSidebar(false);
-			}
+			// Obsidian closes a plugin's panels when the plugin is turned off, so add it back.
+			if (this.settings.showSidebar) void this.openSidebar(false);
 		});
 		this.addCommand({
 			id: "open-sidebar",
@@ -236,6 +234,7 @@ export default class TakeNote extends Plugin {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
 		// Settings from before providers existed: work out which one the URL points at.
 		if (saved && !saved.provider) this.settings.provider = inferProvider(this.settings.baseUrl);
+		delete (this.settings as Partial<Record<"sidebarAdded", unknown>>).sidebarAdded; // replaced by showSidebar
 	}
 
 	/** Switch LLM provider, remembering the old one's URL, model and key for switching back. */
@@ -319,6 +318,10 @@ export default class TakeNote extends Plugin {
 			leaf = right;
 		}
 		if (reveal) await this.app.workspace.revealLeaf(leaf);
+	}
+
+	closeSidebar() {
+		this.app.workspace.detachLeavesOfType(VIEW_TYPE);
 	}
 
 	private sidebarViews(): TakeNoteView[] {
@@ -600,16 +603,18 @@ export default class TakeNote extends Plugin {
 
 	async startRecording(where: "new" | "current") {
 		let note = where === "current" ? this.activeNote() : null;
+		let fresh: string | null = null;
 		try {
 			if (!note) {
 				note = await this.createMeetingNote();
+				fresh = await this.app.vault.read(note);
 				await this.openNote(note);
 			}
 			const name = `${moment().format("YYYY-MM-DD HHmm")} recording.${this.recorder.ext}`;
 			const audioPath = await this.app.fileManager.getAvailablePathForAttachment(name, note.path);
 			await this.ensureFolder(path.posix.dirname(audioPath));
 			await this.recorder.start(this.absPath(audioPath), this.settings.micDeviceId || undefined);
-			this.recording = { note, audioPath };
+			this.recording = { note, audioPath, fresh };
 			this.updateStatus();
 			new Notice("🔴 Recording. Type your own notes under \"My notes\" — click the timer in the status bar to stop.");
 		} catch (e) {
@@ -635,6 +640,11 @@ export default class TakeNote extends Plugin {
 			new Notice((e as Error).message, 10000);
 		}
 		this.updateStatus();
+		const min = this.settings.minRecordingSeconds;
+		if (min > 0 && ms < min * 1000) {
+			await this.discardRecording(rec, ms, min);
+			return;
+		}
 		const audio = await this.waitForFile(rec.audioPath);
 		const link = audio ? "!" + this.app.fileManager.generateMarkdownLink(audio, rec.note.path) : `![[${path.basename(rec.audioPath)}]]`;
 		// Link the audio right away so it is never orphaned, even if transcription is skipped.
@@ -643,6 +653,33 @@ export default class TakeNote extends Plugin {
 		);
 		new Notice(`Recording saved (${formatClock(ms)}).`);
 		if (this.settings.autoTranscribe) await this.transcribe(rec.note, rec.audioPath, link);
+	}
+
+	/** A recording stopped within seconds was most likely a mis-tap: remove it instead of transcribing. */
+	private async discardRecording(rec: { note: TFile; audioPath: string; fresh: string | null }, ms: number, min: number) {
+		const audio = await this.waitForFile(rec.audioPath);
+		try {
+			// trashFile follows the user's "Deleted files" setting, so it can be recovered.
+			if (audio) await this.app.fileManager.trashFile(audio);
+			else fs.rmSync(this.absPath(rec.audioPath), { force: true });
+		} catch {
+			/* already gone */
+		}
+		let removedNote = false;
+		const note = this.app.vault.getAbstractFileByPath(rec.note.path);
+		if (rec.fresh !== null && note instanceof TFile) {
+			const now = await this.app.vault.read(note);
+			if (now.trim() === rec.fresh.trim()) {
+				await this.app.fileManager.trashFile(note);
+				removedNote = true;
+			}
+		}
+		new Notice(
+			`🗑️ Discarded a ${formatClock(ms)} recording: stopped within ${min} s, so it looked accidental.` +
+				(removedNote ? " Its empty meeting note was removed too." : "") +
+				"\nChange this under Settings → Take Note → Discard short recordings.",
+			8000,
+		);
 	}
 
 	// ---------- transcription ----------
@@ -737,8 +774,11 @@ export default class TakeNote extends Plugin {
 			let msg = `✅ Transcribed ${formatClock(res.durationSec * 1000)} of audio in ${formatClock(Date.now() - started)}.`;
 			if (speakerCount) {
 				const unknown = speakerCount - (res.recognised?.length ?? 0);
-				msg += `\n👥 ${speakerCount} speakers` + (res.recognised?.length ? `, recognised: ${res.recognised.join(", ")}` : "");
-				if (unknown) msg += `.\nRun "Name the speakers in this note" to name the other ${unknown}.`;
+				msg += `\n👥 ${speakerCount} speaker${speakerCount === 1 ? "" : "s"}` + (res.recognised?.length ? `, recognised: ${res.recognised.join(", ")}` : "");
+				if (unknown) {
+					const who = unknown === speakerCount ? "them" : `the other ${unknown}`;
+					msg += `.\nRun "Name the speakers in this note" to name ${who}.`;
+				}
 			} else if (res.speakerError) {
 				msg += `\n⚠️ Couldn't separate speakers: ${res.speakerError}`;
 			}

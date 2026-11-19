@@ -106,7 +106,7 @@ As required by Obsidian's developer policies:
 
 | You want to… | Do this |
 |---|---|
-| Record a meeting | Click the floating mic button (or the ribbon icon). Type your own notes under **My notes** while it records. Click the red timer in the status bar to stop. Transcript and AI notes appear automatically. |
+| Record a meeting | Click the floating mic button (or the ribbon icon). Type your own notes under **My notes** while it records. Click the red timer in the status bar to stop. Transcript and AI notes appear automatically. A recording stopped within 20 s is treated as a mis-tap and discarded (change it in settings). |
 | Only take rough notes | **New meeting note**, type, then run **Summarize & extract…** |
 | Process a Zoom/Teams/Meet transcript | Paste it into a note and run **Summarize & extract…** |
 | Process a recording file | **Import a recording…** (audio or video; it is not copied into the vault) |
@@ -116,7 +116,7 @@ As required by Obsidian's developer policies:
 **Summary** shows the AI notes (tick tasks right there), **Transcript** shows who said what with
 a search box, and clicking a timestamp plays the recording from that moment. **Notes** is a box for
 your own notes during the meeting; it saves into the note's "My notes" section, which the AI reads. Its toolbar records,
-summarizes, transcribes and names speakers. Reopen it with **Open the sidebar** if you close it.
+summarizes, transcribes and names speakers. It comes back each time Obsidian starts; turn **Sidebar** off in settings if you don't want it.
 
 The floating mic button changes face while it listens, pauses and thinks. Right-click it for
 more actions, drag it anywhere, or hide it in settings.

@@ -20,8 +20,8 @@ export interface TakeNoteSettings {
 	// Floating button
 	showFloatingButton: boolean;
 	floatingButtonPos: { right: number; bottom: number } | null;
-	/** The sidebar is added once on first run; if you close it, it stays closed. */
-	sidebarAdded: boolean;
+	/** Put the Take Note panel in the right sidebar whenever Obsidian starts or the plugin loads. */
+	showSidebar: boolean;
 	// Notes
 	meetingsFolder: string;
 	peopleFolder: string;
@@ -39,6 +39,8 @@ export interface TakeNoteSettings {
 	matchThreshold: number;
 	// Recording / transcription
 	micDeviceId: string;
+	/** Recordings stopped before this many seconds are treated as accidental and discarded. 0 = keep all. */
+	minRecordingSeconds: number;
 	autoTranscribe: boolean;
 	autoProcess: boolean;
 	ffmpegPath: string;
@@ -62,7 +64,7 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	providerMemory: {},
 	showFloatingButton: true,
 	floatingButtonPos: null,
-	sidebarAdded: false,
+	showSidebar: true,
 	meetingsFolder: "Meetings",
 	peopleFolder: "People",
 	linkPeople: true,
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	mergeThreshold: 0.75,
 	matchThreshold: 0.6,
 	micDeviceId: "",
+	minRecordingSeconds: 20,
 	autoTranscribe: true,
 	autoProcess: true,
 	ffmpegPath: "/opt/homebrew/bin/ffmpeg",
@@ -237,6 +240,18 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl).setName("Notes").setHeading();
+
+		new Setting(containerEl)
+			.setName("Sidebar")
+			.setDesc("Keep the Take Note panel (summary, transcript, your notes) in the right sidebar.")
+			.addToggle((t) =>
+				t.setValue(s.showSidebar).onChange(async (v) => {
+					s.showSidebar = v;
+					await save();
+					if (v) await this.plugin.openSidebar(true);
+					else this.plugin.closeSidebar();
+				}),
+			);
 
 		new Setting(containerEl)
 			.setName("Floating mic button")
@@ -431,6 +446,19 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				await save();
 			});
 		});
+
+		new Setting(containerEl)
+			.setName("Discard short recordings")
+			.setDesc("Seconds. A recording stopped sooner than this is treated as an accidental tap: the audio goes to the trash, nothing is transcribed, and a new meeting note you didn't type in is removed. 0 keeps every recording.")
+			.addText((t) =>
+				t.setValue(String(s.minRecordingSeconds)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					if (n >= 0 && n <= 600) {
+						s.minRecordingSeconds = n;
+						await save();
+					}
+				}),
+			);
 
 		new Setting(containerEl)
 			.setName("Transcribe automatically when recording stops")
