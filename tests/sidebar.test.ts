@@ -68,3 +68,28 @@ test("ticks the n-th task inside the AI block only", () => {
 	assert.equal(setTaskInAiBlock(note, 5, true), note);
 	assert.equal(setTaskInAiBlock("no block", 0, true), "no block");
 });
+
+test("reads and replaces the My notes section", async () => {
+	const { getMyNotes, setMyNotes } = await import("../src/sidebar-data.ts");
+	const note = ["---", "tags: [meeting]", "---", "# Weekly sync", "", "## My notes", "- release friday", "- ask Bob about rounding", "", TX_START, "## Transcript", TX_END, ""].join("\n");
+	assert.equal(getMyNotes(note), "- release friday\n- ask Bob about rounding");
+	const updated = setMyNotes(note, "- release friday\n- rounding fixed\n- new line");
+	assert.equal(getMyNotes(updated), "- release friday\n- rounding fixed\n- new line");
+	assert.ok(updated.includes("\n\n" + TX_START), "keeps a blank line before the transcript");
+	assert.ok(updated.startsWith("---\ntags: [meeting]\n---\n# Weekly sync\n\n## My notes\n"));
+	// Stops at the next heading, not at ### sub-headings inside the notes.
+	const withSub = "## My notes\n### Agenda\n- one\n## Other\nkeep";
+	assert.equal(getMyNotes(withSub), "### Agenda\n- one");
+	assert.equal(setMyNotes(withSub, "x"), "## My notes\nx\n\n## Other\nkeep");
+});
+
+test("adds a My notes section when missing", async () => {
+	const { getMyNotes, setMyNotes } = await import("../src/sidebar-data.ts");
+	assert.equal(getMyNotes("# Title\ntext"), null);
+	const withTx = setMyNotes(`# Title\n\n${TX_START}\nx\n${TX_END}\n`, "- hello");
+	assert.ok(withTx.indexOf("## My notes\n- hello") < withTx.indexOf(TX_START));
+	assert.equal(setMyNotes("# Title", "- hi"), "# Title\n\n## My notes\n- hi\n");
+	// AI block placed after the title is not swallowed by the notes section.
+	const ai = `# T\n${AI_START}\n## Summary\n${AI_END}\n\n## My notes\n- a\n`;
+	assert.equal(getMyNotes(ai), "- a");
+});

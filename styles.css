@@ -140,3 +140,15 @@
 .take-note-spk-4 { color: var(--color-pink); }
 .take-note-spk-5 { color: var(--color-cyan); }
 .take-note-side-none { color: var(--text-muted); padding: 8px; }
+.take-note-side-notes {
+	width: 100%;
+	height: var(--take-note-notes-height, 160px);
+	min-height: 160px;
+	margin-top: 6px;
+	resize: vertical;
+	font-family: var(--font-text);
+	font-size: var(--font-ui-small);
+	line-height: 1.5;
+	padding: 8px 10px;
+}
+.take-note-side-saved { font-size: var(--font-ui-smaller); color: var(--text-faint); text-align: right; min-height: 1.4em; }

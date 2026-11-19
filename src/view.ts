@@ -1,13 +1,13 @@
-// The Take Note sidebar: summary and transcript of the meeting note you're looking at.
+// The Take Note sidebar: summary, transcript and your own notes for the open meeting note.
 import { ItemView, Keymap, MarkdownRenderer, TFile, type WorkspaceLeaf, debounce, setIcon } from "obsidian";
 import type TakeNote from "./main.ts";
 import { MASCOT_ICON } from "./mascot.ts";
 import { AI_END, AI_START, TX_END, TX_START, getBlock } from "./render.ts";
-import { type TranscriptLine, embedTarget, parseTranscript, setTaskInAiBlock } from "./sidebar-data.ts";
+import { type TranscriptLine, embedTarget, getMyNotes, parseTranscript, setMyNotes, setTaskInAiBlock } from "./sidebar-data.ts";
 
 export const VIEW_TYPE = "take-note-sidebar";
 
-type Tab = "summary" | "transcript";
+type Tab = "summary" | "transcript" | "notes";
 
 export class TakeNoteView extends ItemView {
 	private note: TFile | null = null;
@@ -18,6 +18,10 @@ export class TakeNoteView extends ItemView {
 	private audio: HTMLAudioElement | null = null;
 	private lineEls: { el: HTMLElement; seconds: number | null }[] = [];
 	private renderSeq = 0;
+	private notesEl: HTMLTextAreaElement | null = null;
+	private notesStateEl: HTMLElement | null = null;
+	private pendingNotes: { note: TFile; text: string } | null = null;
+	private saveNotesSoon = debounce(() => void this.flushNotes(), 800, true);
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -48,7 +52,8 @@ export class TakeNoteView extends ItemView {
 		this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.followActive()));
 		this.registerEvent(
 			this.app.vault.on("modify", (f) => {
-				if (f === this.note) refreshSoon();
+				// Don't redraw under the cursor while you're typing in the Notes tab.
+				if (f === this.note && !this.editingNotes()) refreshSoon();
 			}),
 		);
 		this.registerEvent(
@@ -69,6 +74,7 @@ export class TakeNoteView extends ItemView {
 
 	async onClose(): Promise<void> {
 		this.audio?.pause();
+		await this.flushNotes();
 	}
 
 	/** Show the active Markdown note. Clicking into the sidebar itself keeps the current note. */
@@ -79,6 +85,7 @@ export class TakeNoteView extends ItemView {
 			return;
 		}
 		if (f === this.note && !force) return;
+		void this.flushNotes();
 		this.note = f;
 		this.filter = "";
 		void this.render();
@@ -126,7 +133,7 @@ export class TakeNoteView extends ItemView {
 		} else {
 			button("mic", note && this.plugin.isMeetingNote(note) ? "Record in this note" : "Record in a new meeting note", () => this.plugin.toggleRecording(), !busy);
 		}
-		button("sparkles", "Summarize with AI", () => note && void this.plugin.processNote(note), !!note && !busy);
+		button("sparkles", "Summarize with AI", () => note && void this.flushNotes().then(() => this.plugin.processNote(note)), !!note && !busy);
 		button("audio-lines", "Transcribe audio in this note", () => note && void this.plugin.transcribeEmbedded(note), !!note && !busy);
 		button("users", "Name the speakers", () => note && void this.plugin.nameSpeakers(note), !!note && !busy);
 		if (busy) button("x", "Cancel", () => this.plugin.cancelJobs());
@@ -155,6 +162,7 @@ export class TakeNoteView extends ItemView {
 		for (const [id, label] of [
 			["summary", "Summary"],
 			["transcript", "Transcript"],
+			["notes", "Notes"],
 		] as [Tab, string][]) {
 			const t = tabs.createDiv({ cls: "take-note-side-tab", text: label });
 			t.toggleClass("is-active", this.tab === id);
@@ -165,8 +173,10 @@ export class TakeNoteView extends ItemView {
 		}
 
 		const pane = this.bodyEl.createDiv({ cls: "take-note-side-pane" });
+		this.notesEl = null;
 		if (this.tab === "summary") await this.renderSummary(pane, note, content);
-		else this.renderTranscript(pane, note, content);
+		else if (this.tab === "transcript") this.renderTranscript(pane, note, content);
+		else this.renderNotes(pane, note, content);
 	}
 
 	private emptyState(message: string, actions: [string, string, () => void][], parent = this.bodyEl) {
@@ -251,6 +261,63 @@ export class TakeNoteView extends ItemView {
 			draw();
 		});
 		draw();
+	}
+
+	private editingNotes(): boolean {
+		return !!this.notesEl?.isConnected && this.notesEl.ownerDocument.activeElement === this.notesEl;
+	}
+
+	/** Write what you typed into the note's "My notes" section. */
+	private async flushNotes() {
+		const pending = this.pendingNotes;
+		if (!pending) return;
+		this.pendingNotes = null;
+		await this.app.vault.process(pending.note, (c) => (getMyNotes(c) === pending.text.replace(/\s+$/, "") ? c : setMyNotes(c, pending.text)));
+		if (!this.pendingNotes) this.notesStateEl?.setText("Saved");
+	}
+
+	private renderNotes(pane: HTMLElement, note: TFile, content: string) {
+		pane.createDiv({ cls: "take-note-side-meta", text: "Saved into this note's \"My notes\" section. The AI reads it when it summarizes." });
+		const area = pane.createEl("textarea", {
+			cls: "take-note-side-notes",
+			attr: { placeholder: "- What was decided\n- Who will do what\n- Questions to follow up", spellcheck: "true" },
+		});
+		area.value = getMyNotes(content) ?? "";
+		this.notesEl = area;
+		this.notesStateEl = pane.createDiv({ cls: "take-note-side-saved" });
+
+		const grow = () => {
+			area.setCssProps({ "--take-note-notes-height": "auto" });
+			area.setCssProps({ "--take-note-notes-height": `${Math.max(160, area.scrollHeight + 4)}px` });
+		};
+		area.addEventListener("input", () => {
+			this.pendingNotes = { note, text: area.value };
+			this.notesStateEl?.setText("Saving…");
+			grow();
+			this.saveNotesSoon();
+		});
+		area.addEventListener("blur", () => {
+			void this.flushNotes().then(() => void this.render());
+		});
+		// Enter continues a list: "- ", "- [ ] ", "1. ". Enter on an empty bullet ends the list.
+		area.addEventListener("keydown", (evt) => {
+			if (evt.key !== "Enter" || evt.shiftKey || evt.isComposing) return;
+			const pos = area.selectionStart;
+			if (pos !== area.selectionEnd) return;
+			const lineStart = area.value.lastIndexOf("\n", pos - 1) + 1;
+			const line = area.value.slice(lineStart, pos);
+			const m = line.match(/^(\s*)([-*+]|\d+\.)( \[[ xX]\])? /);
+			if (!m) return;
+			evt.preventDefault();
+			if (line === m[0]) {
+				area.setRangeText("", lineStart, pos, "end");
+			} else {
+				const bullet = /^\d+\.$/.test(m[2]) ? `${parseInt(m[2], 10) + 1}.` : m[2];
+				area.setRangeText(`\n${m[1]}${bullet}${m[3] ? " [ ]" : ""} `, pos, pos, "end");
+			}
+			area.dispatchEvent(new Event("input"));
+		});
+		window.setTimeout(grow, 0);
 	}
 
 	private drawLine(list: HTMLElement, line: TranscriptLine, speakers: string[]) {

@@ -83,3 +83,39 @@ export function setTaskInAiBlock(content: string, n: number, done: boolean): str
 	}
 	return content;
 }
+
+const MY_NOTES = /^## My notes[ \t]*$/m;
+
+/** Where the "## My notes" section's text starts and ends (end = next heading or plugin block). */
+function myNotesRange(content: string): { headingStart: number; start: number; end: number } | null {
+	const m = MY_NOTES.exec(content);
+	if (!m) return null;
+	const headingStart = m.index;
+	let start = headingStart + m[0].length;
+	if (content[start] === "\r") start++;
+	if (content[start] === "\n") start++;
+	const rest = content.slice(start);
+	const stop = rest.search(/^(#{1,2} |<!-- take-note:)/m);
+	return { headingStart, start, end: stop === -1 ? content.length : start + stop };
+}
+
+/** The user's own notes under "## My notes", or null if the note has no such section. */
+export function getMyNotes(content: string): string | null {
+	const r = myNotesRange(content);
+	return r ? content.slice(r.start, r.end).replace(/\s+$/, "") : null;
+}
+
+/** Replace the "## My notes" section's text, adding the section (before the transcript) if missing. */
+export function setMyNotes(content: string, text: string): string {
+	const body = text.replace(/\s+$/, "");
+	const r = myNotesRange(content);
+	if (r) {
+		const after = content.slice(r.end);
+		const gap = after.length ? "\n\n" : "\n";
+		return content.slice(0, r.start) + body + gap + after;
+	}
+	const section = `## My notes\n${body}\n`;
+	const tx = content.indexOf("<!-- take-note:transcript:start -->");
+	if (tx !== -1) return content.slice(0, tx) + section + "\n" + content.slice(tx);
+	return content.replace(/\s*$/, "") + "\n\n" + section;
+}

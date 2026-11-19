@@ -114,7 +114,8 @@ As required by Obsidian's developer policies:
 
 **Sidebar:** the Take Note panel in the right sidebar follows the meeting note you have open.
 **Summary** shows the AI notes (tick tasks right there), **Transcript** shows who said what with
-a search box, and clicking a timestamp plays the recording from that moment. Its toolbar records,
+a search box, and clicking a timestamp plays the recording from that moment. **Notes** is a box for
+your own notes during the meeting; it saves into the note's "My notes" section, which the AI reads. Its toolbar records,
 summarizes, transcribes and names speakers. Reopen it with **Open the sidebar** if you close it.
 
 The floating mic button changes face while it listens, pauses and thinks. Right-click it for
