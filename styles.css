@@ -103,7 +103,7 @@
 .take-note-side-status-sub { font-size: var(--font-ui-smaller); color: var(--text-muted); }
 .take-note-side-status[data-mood="recording"] .take-note-side-status-main { color: var(--color-red); }
 .take-note-side-toolbar { display: flex; gap: 2px; }
-.take-note-side-toolbar .is-disabled { opacity: 0.35; pointer-events: none; }
+.take-note-side-toolbar .is-disabled { opacity: 0.35; cursor: default; } /* still hoverable, so its tooltip says why */
 .take-note-side-body { padding: 10px 12px 24px; }
 .take-note-side-title { font-weight: var(--font-bold); font-size: var(--font-ui-medium); margin-bottom: 8px; cursor: pointer; overflow-wrap: anywhere; }
 .take-note-side-title:hover { color: var(--text-accent); }

@@ -1,7 +1,7 @@
 // The Take Note sidebar: summary, transcript and your own notes for the open meeting note.
-import { ItemView, Keymap, MarkdownRenderer, TFile, type WorkspaceLeaf, debounce, setIcon } from "obsidian";
+import { ItemView, Keymap, MarkdownRenderer, TFile, type WorkspaceLeaf, debounce, setIcon, setTooltip } from "obsidian";
 import type TakeNote from "./main.ts";
-import { MASCOT_ICON } from "./mascot.ts";
+import { MASCOT_ICON, type Mood } from "./mascot.ts";
 import { AI_END, AI_START, TX_END, TX_START, getBlock } from "./render.ts";
 import { type TranscriptLine, embedTarget, getMyNotes, parseTranscript, setMyNotes, setTaskInAiBlock } from "./sidebar-data.ts";
 
@@ -18,6 +18,15 @@ export class TakeNoteView extends ItemView {
 	private audio: HTMLAudioElement | null = null;
 	private lineEls: { el: HTMLElement; seconds: number | null }[] = [];
 	private renderSeq = 0;
+	private statusParts: {
+		face: HTMLElement;
+		main: HTMLElement;
+		sub: HTMLElement;
+		toolbar: HTMLElement;
+		mood: Mood | null;
+		subKeyShown: string;
+		toolbarKeyShown: string;
+	} | null = null;
 	private notesEl: HTMLTextAreaElement | null = null;
 	private notesStateEl: HTMLElement | null = null;
 	private pendingNotes: { note: TFile; text: string } | null = null;
@@ -95,26 +104,56 @@ export class TakeNoteView extends ItemView {
 	updateStatus() {
 		if (!this.statusEl) return;
 		const s = this.plugin.status();
-		this.statusEl.empty();
-		this.statusEl.dataset.mood = s.mood;
-		const face = this.statusEl.createDiv({ cls: "take-note-side-face" });
-		setIcon(face, MASCOT_ICON[s.mood]);
-		const text = this.statusEl.createDiv({ cls: "take-note-side-status-text" });
-		text.createDiv({ cls: "take-note-side-status-main", text: s.text });
-		if (s.recordingNote && s.recordingNote !== this.note) {
-			const link = text.createEl("a", { cls: "take-note-side-status-sub", text: `in ${s.recordingNote.basename}`, href: "#" });
-			const target = s.recordingNote;
-			link.addEventListener("click", (evt) => {
-				evt.preventDefault();
-				void this.app.workspace.getLeaf(false).openFile(target);
-			});
+		const note = this.note;
+		const busy = s.mood === "busy";
+		const meeting = !!note && this.plugin.isMeetingNote(note);
+
+		// Runs every second for the timer: only rebuild what changed, so hovering a button
+		// keeps its tooltip instead of the element being replaced under the mouse.
+		if (!this.statusParts) {
+			this.statusEl.empty();
+			const face = this.statusEl.createDiv({ cls: "take-note-side-face" });
+			const text = this.statusEl.createDiv({ cls: "take-note-side-status-text" });
+			const main = text.createDiv({ cls: "take-note-side-status-main" });
+			const sub = text.createDiv({ cls: "take-note-side-status-sub" });
+			const toolbar = this.statusEl.createDiv({ cls: "take-note-side-toolbar" });
+			this.statusParts = { face, main, sub, toolbar, mood: null, subKeyShown: "", toolbarKeyShown: "" };
 		}
-		const toolbar = this.statusEl.createDiv({ cls: "take-note-side-toolbar" });
-		const button = (icon: string, label: string, run: () => void, enabled = true) => {
-			const b = toolbar.createDiv({ cls: "clickable-icon", attr: { "aria-label": label, role: "button", tabindex: "0" } });
+		const parts = this.statusParts;
+		this.statusEl.dataset.mood = s.mood;
+		if (parts.mood !== s.mood) {
+			parts.mood = s.mood;
+			setIcon(parts.face, MASCOT_ICON[s.mood]);
+		}
+		parts.main.setText(s.text);
+
+		const subKey = s.recordingNote && s.recordingNote !== note ? s.recordingNote.path : "";
+		if (subKey !== parts.subKeyShown) {
+			parts.subKeyShown = subKey;
+			parts.sub.empty();
+			if (s.recordingNote && subKey) {
+				const target = s.recordingNote;
+				const link = parts.sub.createEl("a", { text: `in ${target.basename}`, href: "#" });
+				setTooltip(link, "Go to the note being recorded", { placement: "bottom" });
+				link.addEventListener("click", (evt) => {
+					evt.preventDefault();
+					void this.app.workspace.getLeaf(false).openFile(target);
+				});
+			}
+		}
+
+		const toolbarKey = [s.mood, note?.path ?? "", meeting].join("|");
+		if (toolbarKey === parts.toolbarKeyShown) return;
+		parts.toolbarKeyShown = toolbarKey;
+		const toolbar = parts.toolbar;
+		toolbar.empty();
+		const button = (icon: string, tip: string, run: () => void, disabledBecause?: string) => {
+			const b = toolbar.createDiv({ cls: "clickable-icon", attr: { role: "button", tabindex: "0" } });
 			setIcon(b, icon);
-			if (!enabled) {
+			setTooltip(b, disabledBecause ? `${tip}\n(${disabledBecause})` : tip, { placement: "bottom" });
+			if (disabledBecause) {
 				b.addClass("is-disabled");
+				b.setAttr("aria-disabled", "true");
 				return;
 			}
 			b.addEventListener("click", run);
@@ -125,18 +164,27 @@ export class TakeNoteView extends ItemView {
 				}
 			});
 		};
-		const note = this.note;
-		const busy = s.mood === "busy";
+		const why = busy ? "busy, wait or cancel" : !note ? "open a note first" : undefined;
 		if (s.mood === "recording" || s.mood === "paused") {
-			button(s.mood === "paused" ? "play" : "pause", s.mood === "paused" ? "Resume" : "Pause", () => this.plugin.togglePause());
-			button("square", "Stop recording", () => void this.plugin.stopRecording());
+			button(s.mood === "paused" ? "play" : "pause", s.mood === "paused" ? "Resume recording" : "Pause recording", () => this.plugin.togglePause());
+			button("square", "Stop recording, then transcribe and summarize", () => void this.plugin.stopRecording());
 		} else {
-			button("mic", note && this.plugin.isMeetingNote(note) ? "Record in this note" : "Record in a new meeting note", () => this.plugin.toggleRecording(), !busy);
+			button(
+				"mic",
+				meeting ? "Record this meeting into this note" : "Record a meeting into a new meeting note",
+				() => this.plugin.toggleRecording(),
+				busy ? "busy, wait or cancel" : undefined,
+			);
 		}
-		button("sparkles", "Summarize with AI", () => note && void this.flushNotes().then(() => this.plugin.processNote(note)), !!note && !busy);
-		button("audio-lines", "Transcribe audio in this note", () => note && void this.plugin.transcribeEmbedded(note), !!note && !busy);
-		button("users", "Name the speakers", () => note && void this.plugin.nameSpeakers(note), !!note && !busy);
-		if (busy) button("x", "Cancel", () => this.plugin.cancelJobs());
+		button(
+			"sparkles",
+			"Summarize with AI: summary, decisions, action items, tickets and questions",
+			() => note && void this.flushNotes().then(() => this.plugin.processNote(note)),
+			why,
+		);
+		button("audio-lines", "Transcribe the recording in this note", () => note && void this.plugin.transcribeEmbedded(note), why);
+		button("users", "Name the speakers (their voices are remembered next time)", () => note && void this.plugin.nameSpeakers(note), why);
+		if (busy) button("x", "Cancel the running transcription or AI job", () => this.plugin.cancelJobs());
 	}
 
 	async render(): Promise<void> {
@@ -326,7 +374,7 @@ export class TakeNoteView extends ItemView {
 			const time = row.createEl("button", { cls: "take-note-side-time", text: line.clock.replace(/^00:/, "") });
 			if (this.audio && line.seconds !== null) {
 				const at = line.seconds;
-				time.setAttr("aria-label", "Play from here");
+				setTooltip(time, "Play the recording from here");
 				time.addEventListener("click", () => {
 					if (!this.audio) return;
 					this.audio.currentTime = at;

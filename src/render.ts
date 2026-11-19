@@ -314,3 +314,29 @@ export function upsertPersonLine(content: string, meetingName: string, summary: 
 	}
 	return lines.join("\n");
 }
+
+/**
+ * The value for the `created` property. `withTime` follows the vault's property type
+ * (date & time → "2026-11-19T17:49", date → "2026-11-19").
+ *
+ * An existing value is kept, except a bare date is given a time when we know one: from the
+ * recording's file name ("2026-11-19 1749 recording.webm"), else from when the note file was
+ * created, if that is the same day.
+ */
+export function createdValue(
+	current: unknown,
+	opts: { withTime: boolean; content: string; fileCreated: number; fallbackDate: string },
+): string {
+	const cur = typeof current === "string" ? current.trim() : "";
+	const date = cur.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? opts.fallbackDate;
+	if (cur && (!opts.withTime || /^\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}/.test(cur))) return cur;
+	if (!opts.withTime) return date;
+
+	const rec = opts.content.match(/(\d{4}-\d{2}-\d{2}) (\d{2})(\d{2}) recording\.\w+/);
+	if (rec && rec[1] === date) return `${date}T${rec[2]}:${rec[3]}`;
+	const made = new Date(opts.fileCreated);
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const madeDate = `${made.getFullYear()}-${pad(made.getMonth() + 1)}-${pad(made.getDate())}`;
+	if (opts.fileCreated > 0 && madeDate === date) return `${date}T${pad(made.getHours())}:${pad(made.getMinutes())}`;
+	return cur || date;
+}

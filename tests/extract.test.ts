@@ -144,3 +144,22 @@ test("tickets without a priority render without a Priority label", () => {
 	assert.ok(!md.includes("**Priority:**"));
 	assert.match(md, /\*\*Owner:\*\* \[\[Dana\]\]/);
 });
+
+test("createdValue adds the meeting time when the vault uses date & time", async () => {
+	const { createdValue } = await import("../src/render.ts");
+	const at = (iso: string) => new Date(iso).getTime(); // local time
+	const base = { withTime: true, content: "", fileCreated: 0, fallbackDate: "2026-11-19" };
+	// Bare date + a recording from that day → the recording's start time.
+	assert.equal(createdValue("2026-11-19", { ...base, content: "![[../Attachments/2026-11-19 1807 recording.webm]]" }), "2026-11-19T18:07");
+	// No recording → when the note file was created, if it's the same day.
+	assert.equal(createdValue("2026-11-19", { ...base, fileCreated: at("2026-11-19T09:05:00") }), "2026-11-19T09:05");
+	assert.equal(createdValue("2026-11-19", { ...base, fileCreated: at("2026-11-21T09:05:00") }), "2026-11-19", "a copy made days later doesn't lend its time");
+	// A recording from another day doesn't count either.
+	assert.equal(createdValue("2026-11-19", { ...base, content: "2026-11-18 1500 recording.m4a" }), "2026-11-19");
+	// Existing times are never changed; missing values are filled.
+	assert.equal(createdValue("2026-11-19T10:30", base), "2026-11-19T10:30");
+	assert.equal(createdValue(undefined, { ...base, content: "2026-11-19 0930 recording.webm" }), "2026-11-19T09:30");
+	// Vaults where created is a plain date keep plain dates.
+	assert.equal(createdValue("2026-11-19", { ...base, withTime: false, content: "2026-11-19 1807 recording.webm" }), "2026-11-19");
+	assert.equal(createdValue(undefined, { ...base, withTime: false }), "2026-11-19");
+});

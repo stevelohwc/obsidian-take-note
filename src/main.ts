@@ -31,6 +31,7 @@ import {
 	TX_END,
 	TX_START,
 	collectSources,
+	createdValue,
 	formatClock,
 	renderMeeting,
 	getBlock,
@@ -578,8 +579,23 @@ export default class TakeNote extends Plugin {
 
 	// ---------- notes ----------
 
+	/**
+	 * Whether `created` should carry a time. Follows the vault's property type (Settings →
+	 * Properties); a vault that hasn't typed it yet gets date & time.
+	 */
+	private async createdHasTime(): Promise<boolean> {
+		try {
+			const raw = await this.app.vault.adapter.read(normalizePath(`${this.app.vault.configDir}/types.json`));
+			const types = (JSON.parse(raw) as { types?: Record<string, string> }).types ?? {};
+			return types.created !== "date";
+		} catch {
+			return true;
+		}
+	}
+
 	async createMeetingNote(title?: string): Promise<TFile> {
 		const date = moment().format("YYYY-MM-DD");
+		const created = (await this.createdHasTime()) ? moment().format("YYYY-MM-DDTHH:mm") : date;
 		const base = safeFileName(`${date} – ${title ?? "Meeting " + moment().format("HHmm")}`);
 		await this.ensureFolder(this.settings.meetingsFolder);
 		const p = this.uniquePath(this.settings.meetingsFolder, base, "md");
@@ -587,7 +603,7 @@ export default class TakeNote extends Plugin {
 			"---",
 			"tags:",
 			"  - meeting",
-			`created: ${date}`,
+			`created: ${created}`,
 			"people: []",
 			"---",
 			`# ${path.basename(p, ".md")}`,
@@ -853,11 +869,12 @@ export default class TakeNote extends Plugin {
 				model: s.model,
 			});
 			await this.app.vault.process(note, (c) => upsertBlock(c, AI_START, AI_END, md, "afterTitle"));
+			const withTime = await this.createdHasTime();
 			await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
 				const tags = new Set<string>(asList(fm.tags));
 				tags.add("meeting");
 				fm.tags = [...tags];
-				if (!fm.created) fm.created = this.noteDate(note);
+				fm.created = createdValue(fm.created, { withTime, content, fileCreated: note.stat.ctime, fallbackDate: this.noteDate(note) });
 				const people = new Set<string>(asList(fm.people));
 				result.attendees.filter((a) => !/^(speaker \d+|unknown)$/i.test(a)).forEach((a) => people.add(a));
 				fm.people = [...people];
