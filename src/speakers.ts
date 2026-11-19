@@ -79,6 +79,53 @@ export function mergeSimilarSpeakers(
 	};
 }
 
+/**
+ * Fold "speakers" with very little audio into the closest main speaker.
+ *
+ * A few seconds of speech gives an unreliable voiceprint, so clustering often splits one person
+ * into many tiny speakers (a 2-person call can come back as 12). Clusters under 8 s join the most
+ * similar main speaker unless they sound like nobody (similarity < 0.2). Clusters with more audio
+ * but under 3% of the talk time join only if they clearly sound alike (≥ 0.45), so a real person
+ * who said little in a long meeting keeps their own label.
+ */
+export function absorbMinorSpeakers(
+	segments: DiarSegment[],
+	speakers: Record<string, SpeakerPrint>,
+): { segments: DiarSegment[]; speakers: Record<string, SpeakerPrint> } {
+	const ids = Object.keys(speakers).map(Number);
+	const total = ids.reduce((t, id) => t + speakers[id].seconds, 0);
+	const minor = (id: number) => speakers[id].seconds < Math.max(8, 0.03 * total);
+	const majors = ids.filter((id) => !minor(id) && speakers[id].embedding);
+	if (!majors.length) return { segments, speakers };
+
+	const into = new Map<number, number>();
+	for (const id of ids) {
+		const e = speakers[id].embedding;
+		if (!minor(id) || !e) continue;
+		let best = -1;
+		let score = -Infinity;
+		for (const m of majors) {
+			const c = cosine(e, speakers[m].embedding!);
+			if (c > score) [best, score] = [m, c];
+		}
+		const floor = speakers[id].seconds < 8 ? 0.2 : 0.45;
+		if (score >= floor) into.set(id, best);
+	}
+	if (!into.size) return { segments, speakers };
+
+	const out: Record<string, SpeakerPrint> = {};
+	for (const id of ids) {
+		if (into.has(id)) continue;
+		out[id] = { ...speakers[id] };
+	}
+	// Keep the main speaker's fingerprint (it is the reliable one); add the talk time.
+	for (const [from, to] of into) out[to].seconds = Math.round((out[to].seconds + speakers[from].seconds) * 10) / 10;
+	return {
+		segments: segments.map((s) => (into.has(s.speaker) ? { ...s, speaker: into.get(s.speaker)! } : s)),
+		speakers: out,
+	};
+}
+
 /** Best saved person for each speaker, if the voice is similar enough. */
 export function matchVoices(
 	speakers: Record<string, SpeakerPrint>,

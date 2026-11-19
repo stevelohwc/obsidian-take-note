@@ -4,7 +4,7 @@ import { spawn, ChildProcess } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { cleanTranscript } from "./render.ts";
+import { cleanTranscript, isHallucination } from "./render.ts";
 import {
 	type DiarSegment,
 	type SpeakerPrint,
@@ -14,6 +14,7 @@ import {
 	labelTranscript,
 	matchVoices,
 	mergeSimilarSpeakers,
+	absorbMinorSpeakers,
 } from "./speakers.ts";
 import { helperHome } from "./voices.ts";
 
@@ -187,22 +188,29 @@ export async function transcribeFile(
 			from: s.offsets?.from ?? 0,
 			to: s.offsets?.to ?? 0,
 			text: s.text,
-		}));
+		})).filter((s) => !isHallucination(s.text));
 		language = language ?? json.result?.language ?? null;
 
 		const result: TranscriptResult = { text: "", durationSec, language };
 
 		const diar = diarization ? await (onProgress(99, "Separating speakers"), diarization) : null;
 		if (diar && !(diar instanceof Error) && speakers && diar.segments.length) {
-			const merged = mergeSimilarSpeakers(diar.segments, diar.speakers, speakers.mergeThreshold);
+			let merged = mergeSimilarSpeakers(diar.segments, diar.speakers, speakers.mergeThreshold);
+			// With a fixed speaker count the clustering already did what was asked.
+			if (!speakers.numSpeakers) merged = absorbMinorSpeakers(merged.segments, merged.speakers);
 			const names = matchVoices(merged.speakers, speakers.profiles, speakers.matchThreshold);
 			const { lines, labels } = labelTranscript(whisper, merged.segments, names, cfg.timestamps);
 			result.text = cleanTranscript(lines).join("\n");
 			result.speakers = {};
 			result.recognised = [];
 			for (const [id, label] of labels) {
-				result.speakers[label] = merged.speakers[id];
-				if (names.has(id)) result.recognised.push(label);
+				// Two voice groups can match the same saved person: keep one entry, with the
+				// fingerprint of whichever group spoke longer and the talk time of both.
+				const print = merged.speakers[id];
+				const prev = result.speakers[label];
+				if (!prev) result.speakers[label] = { ...print };
+				else result.speakers[label] = { embedding: (print.seconds > prev.seconds ? print : prev).embedding, seconds: Math.round((prev.seconds + print.seconds) * 10) / 10 };
+				if (names.has(id) && !result.recognised.includes(label)) result.recognised.push(label);
 			}
 		} else {
 			if (diar instanceof Error) result.speakerError = diar.message;

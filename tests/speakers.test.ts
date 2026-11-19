@@ -110,3 +110,68 @@ test("renderMeeting shows a By person section", () => {
 	assert.match(md2, /\*\*Attendees:\*\* \[\[Dana\]\], Speaker 1/);
 	assert.match(md2, /- \[ \] Chase bank — Speaker 1/);
 });
+
+test("absorbMinorSpeakers folds a 2-person call split into many tiny speakers", async () => {
+	const { absorbMinorSpeakers } = await import("../src/speakers.ts");
+	const unitv = (v: number[]) => {
+		const n = Math.hypot(...v);
+		return v.map((x) => x / n);
+	};
+	// Two real voices (orthogonal) plus noisy short fragments of each.
+	const A = [1, 0, 0];
+	const B = [0, 1, 0];
+	const speakers: Record<string, { embedding: number[] | null; seconds: number }> = {
+		0: { embedding: A, seconds: 222 },
+		1: { embedding: B, seconds: 74 },
+		2: { embedding: unitv([0.7, 0.2, 0.6]), seconds: 3.3 }, // like A
+		3: { embedding: unitv([0.2, 0.75, 0.6]), seconds: 3 }, // like B
+		4: { embedding: unitv([0.3, 0.05, 0.95]), seconds: 2.8 }, // weakly A
+		5: { embedding: null, seconds: 0.6 }, // no fingerprint: left alone
+	};
+	const segments = [
+		{ start: 0, end: 5, speaker: 0 },
+		{ start: 5, end: 8, speaker: 2 },
+		{ start: 8, end: 11, speaker: 3 },
+		{ start: 11, end: 14, speaker: 4 },
+		{ start: 14, end: 20, speaker: 1 },
+		{ start: 20, end: 21, speaker: 5 },
+	];
+	const out = absorbMinorSpeakers(segments, speakers);
+	assert.deepEqual(Object.keys(out.speakers).sort(), ["0", "1", "5"]);
+	assert.deepEqual(
+		out.segments.map((s) => s.speaker),
+		[0, 0, 1, 0, 1, 5],
+	);
+	assert.equal(out.speakers[0].seconds, 228.1);
+	assert.deepEqual(out.speakers[0].embedding, A, "keeps the main speaker's reliable fingerprint");
+});
+
+test("absorbMinorSpeakers keeps a real person who spoke little in a long meeting", async () => {
+	const { absorbMinorSpeakers } = await import("../src/speakers.ts");
+	const speakers = {
+		0: { embedding: [1, 0, 0], seconds: 1500 },
+		1: { embedding: [0, 1, 0], seconds: 1200 },
+		2: { embedding: [0.1, 0.1, 0.99], seconds: 40 }, // 1.4% of talk time, sounds like nobody else
+		3: { embedding: [0.05, 0.08, 0.99], seconds: 5 }, // very short, but distinct from the main voices
+	};
+	const out = absorbMinorSpeakers([], speakers);
+	assert.ok(out.speakers[2], "40 s of a distinct voice stays its own speaker");
+	assert.ok(out.speakers[3], "a short clip that sounds like nobody is not forced into someone");
+});
+
+test("isHallucination drops Whisper's invented phrases, not real speech", async () => {
+	const { isHallucination } = await import("../src/render.ts");
+	for (const t of [
+		"请不吝点赞 订阅 转发 打赏支持明镜与点点栏目 请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
+		"字幕由Amara.org社区提供",
+		"谢谢观看!",
+		"Thank you for watching.",
+		"Thanks for watching!",
+		"[MUSIC]",
+		"(applause)",
+		"ご視聴ありがとうございました",
+	])
+		assert.ok(isHallucination(t), t);
+	for (const t of ["OK 好 OK OK 拜拜 拜拜", "谢谢", "Thank you, Alice, that helps.", "也是可以 对", "subscribe the webhook to the deposit topic", "music module is done"])
+		assert.ok(!isHallucination(t), t);
+});

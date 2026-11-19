@@ -224,6 +224,28 @@ export function collectSources(content: string): { notes: string; transcript: st
 	return { notes, transcript };
 }
 
+/**
+ * Phrases Whisper is known to invent during silence or music: subtitle credits and
+ * "like and subscribe" lines it learned from online videos. Nobody says these in a meeting.
+ */
+const HALLUCINATIONS = [
+	/请不吝点赞|打赏支持明镜|明镜与点点栏目|点赞.{0,4}订阅.{0,4}转发/,
+	/字幕(由|製作|制作|提供)|字幕组|優優獨播劇場|优优独播剧场|YoYo Television Series/i,
+	/^(谢谢|謝謝|感谢|感謝)(大家|各位)?(的)?(观看|觀看|收看|收听|收聽)[!！。.,，]*$/,
+	/^(thank you|thanks) (so much )?for watching[.!]*$/i,
+	/^(please )?(like (and|&) )?subscribe[.!]*$/i,
+	/amara\.org|subtitles by|transcribed by https?:/i,
+	/^\[?\(?(music|applause|silence|blank_audio|音乐|音樂|掌声|掌聲)\)?\]?$/i,
+	/ご視聴ありがとうございました|チャンネル登録/,
+	/시청해 ?주셔서 감사합니다|구독과 좋아요/,
+];
+
+/** True for a Whisper segment that is a known made-up phrase rather than speech. */
+export function isHallucination(text: string): boolean {
+	const t = text.trim();
+	return !!t && HALLUCINATIONS.some((re) => re.test(t));
+}
+
 /** Remove whisper's typical repetition loops and blank lines. */
 export function cleanTranscript(lines: string[]): string[] {
 	const out: string[] = [];
