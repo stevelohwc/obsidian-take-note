@@ -1,0 +1,5 @@
+.meeting-copilot-status { cursor: pointer; font-variant-numeric: tabular-nums; }
+.meeting-copilot-status.is-recording { color: var(--color-red); animation: meeting-copilot-pulse 2s ease-in-out infinite; }
+@keyframes meeting-copilot-pulse { 50% { opacity: 0.55; } }
+.meeting-copilot-sample { font-style: italic; margin-top: 2px; }
+.meeting-copilot-readaloud { border-left: 3px solid var(--interactive-accent); padding: 8px 12px; margin: 12px 0; font-size: var(--font-ui-medium); }

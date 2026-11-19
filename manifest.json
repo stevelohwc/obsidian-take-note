@@ -1,0 +1,10 @@
+{
+  "id": "meeting-copilot",
+  "name": "Meeting Copilot",
+  "version": "0.2.0",
+  "minAppVersion": "1.11.4",
+  "description": "Record meetings, transcribe them locally with Whisper, tell speakers apart, and turn them into summaries, action items, tickets, questions and AI assignments with any OpenAI-compatible LLM.",
+  "author": "stevelohwc",
+  "authorUrl": "https://github.com/stevelohwc",
+  "isDesktopOnly": true
+}

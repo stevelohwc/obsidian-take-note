@@ -1,0 +1,18 @@
+# build output (published as release assets, not committed)
+node_modules/
+main.js
+
+# local settings and secrets: never commit
+.env
+.env.*
+data.json
+
+# local test media and editor files
+*.wav
+*.webm
+*.m4a
+*.mp3
+*.aiff
+.DS_Store
+.vscode/
+.idea/
