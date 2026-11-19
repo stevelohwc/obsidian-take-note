@@ -1,6 +1,9 @@
 # Builds the plugin from the tagged source, attests the build provenance of the release
-# assets, and publishes them. Release by pushing a tag equal to the manifest version:
-#   git tag 1.3.4 && git push origin 1.3.4
+# assets, and publishes them. Release by pushing a tag equal to the manifest version,
+# and push main only after this run finishes: Obsidian reads manifest.json from main,
+# and a version there with no release yet shows as an error in the directory.
+#   git tag 1.3.7 && git push origin 1.3.7
+#   gh run watch && git push origin main
 name: Release
 
 on:
