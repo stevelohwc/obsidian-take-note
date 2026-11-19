@@ -323,6 +323,19 @@ export function upsertPersonLine(content: string, meetingName: string, summary: 
  * recording's file name ("2026-11-19 1749 recording.webm"), else from when the note file was
  * created, if that is the same day.
  */
+/** Local date/time as text. Pattern tokens: YYYY MM DD HH mm, e.g. "YYYY-MM-DD HHmm". */
+export function stamp(pattern: string, d: Date = new Date()): string {
+	const pad = (n: number) => String(n).padStart(2, "0");
+	const parts: Record<string, string> = {
+		YYYY: String(d.getFullYear()),
+		MM: pad(d.getMonth() + 1),
+		DD: pad(d.getDate()),
+		HH: pad(d.getHours()),
+		mm: pad(d.getMinutes()),
+	};
+	return pattern.replace(/YYYY|MM|DD|HH|mm/g, (t) => parts[t]);
+}
+
 export function createdValue(
 	current: unknown,
 	opts: { withTime: boolean; content: string; fileCreated: number; fallbackDate: string },
@@ -335,8 +348,6 @@ export function createdValue(
 	const rec = opts.content.match(/(\d{4}-\d{2}-\d{2}) (\d{2})(\d{2}) recording\.\w+/);
 	if (rec && rec[1] === date) return `${date}T${rec[2]}:${rec[3]}`;
 	const made = new Date(opts.fileCreated);
-	const pad = (n: number) => String(n).padStart(2, "0");
-	const madeDate = `${made.getFullYear()}-${pad(made.getMonth() + 1)}-${pad(made.getDate())}`;
-	if (opts.fileCreated > 0 && madeDate === date) return `${date}T${pad(made.getHours())}:${pad(made.getMinutes())}`;
+	if (opts.fileCreated > 0 && stamp("YYYY-MM-DD", made) === date) return stamp("YYYY-MM-DDTHH:mm", made);
 	return cur || date;
 }

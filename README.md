@@ -61,7 +61,7 @@ As required by Obsidian's developer policies:
 
 ## Requirements
 
-- Obsidian **desktop** 1.11.4 or newer
+- Obsidian **desktop** 1.13.0 or newer
 - An **LLM**. Built in: **OpenAI**, **Claude (Anthropic)**, **OpenRouter**, plus local
   [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai) or any OpenAI-compatible
   server (vLLM, LiteLLM…). A model with a large context window (32K+) gives the best results

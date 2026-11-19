@@ -163,3 +163,12 @@ test("createdValue adds the meeting time when the vault uses date & time", async
 	assert.equal(createdValue("2026-11-19", { ...base, withTime: false, content: "2026-11-19 1807 recording.webm" }), "2026-11-19");
 	assert.equal(createdValue(undefined, { ...base, withTime: false }), "2026-11-19");
 });
+
+test("stamp formats local date and time without moment", async () => {
+	const { stamp } = await import("../src/render.ts");
+	const d = new Date(2026, 0, 5, 9, 7);
+	assert.equal(stamp("YYYY-MM-DD", d), "2026-01-05");
+	assert.equal(stamp("YYYY-MM-DDTHH:mm", d), "2026-01-05T09:07");
+	assert.equal(stamp("YYYY-MM-DD HHmm", d), "2026-01-05 0907");
+	assert.equal(stamp("HHmm", d), "0907");
+});

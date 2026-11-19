@@ -1,8 +1,8 @@
 {
   "id": "take-note",
   "name": "Take Note",
-  "version": "1.3.5",
-  "minAppVersion": "1.11.4",
+  "version": "1.3.6",
+  "minAppVersion": "1.13.0",
   "description": "Record meetings, transcribe them locally with Whisper, tell speakers apart, and turn them into summaries, action items, tickets, questions and AI assignments with any OpenAI-compatible LLM.",
   "author": "stevelohwc",
   "authorUrl": "https://github.com/stevelohwc",

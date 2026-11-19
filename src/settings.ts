@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, SecretComponent, Setting, requireApiVersion, type SettingDefinitionItem } from "obsidian";
+import { App, Notice, PluginSettingTab, SecretComponent, Setting, type SettingDefinitionItem } from "obsidian";
 import type TakeNote from "./main.ts";
 import { PROVIDERS, type ProviderId, providerModels } from "./providers.ts";
 import { listInputDevices } from "./recorder.ts";
@@ -91,12 +91,20 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	timestamps: true,
 };
 
+/** Run an async handler from a callback that expects nothing back; errors go to the console. */
+function later<A extends unknown[]>(fn: (...args: A) => Promise<unknown>): (...args: A) => void {
+	return (...args) => {
+		fn(...args).catch((e) => console.error("Take Note:", e));
+	};
+}
+
 /** One settings row: its name and description (also what settings search indexes) and its controls. */
 interface Row {
 	name: string;
 	desc?: string | DocumentFragment;
 	aliases?: string[];
-	render: (setting: Setting) => void;
+	/** Adds the controls. May return the Setting (it chains); the value is ignored. */
+	render: (setting: Setting) => unknown;
 }
 
 interface Section {
@@ -114,7 +122,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 		super(app, plugin);
 	}
 
-	/** Obsidian 1.13+: rendered declaratively and indexed by the settings search. */
+	/** Rendered by Obsidian and indexed by its settings search. */
 	getSettingDefinitions(): SettingDefinitionItem[] {
 		return this.sections().map((section) => ({
 			type: "group",
@@ -128,16 +136,6 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 		}));
 	}
 
-	/** Fallback for Obsidian before 1.13, which has no setting definitions. */
-	display(): void {
-		const { containerEl } = this;
-		containerEl.empty();
-		for (const section of this.sections()) {
-			new Setting(containerEl).setName(section.heading).setHeading();
-			for (const row of section.rows) this.renderRow(new Setting(containerEl), row);
-		}
-	}
-
 	private renderRow(setting: Setting, row: Row): void {
 		setting.setName(row.name);
 		if (row.desc !== undefined) setting.setDesc(row.desc);
@@ -146,8 +144,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 
 	/** Rebuild after a change that adds or removes rows (provider switch, forgotten voice). */
 	private redraw(): void {
-		if (requireApiVersion("1.13.0")) this.update();
-		else this.display();
+		this.update();
 	}
 
 	private sections(): Section[] {
@@ -169,11 +166,11 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				render: (setting) =>
 					setting.addDropdown((d) => {
 						for (const p of Object.values(PROVIDERS)) d.addOption(p.id, p.name);
-						d.setValue(provider.id).onChange(async (v) => {
+						d.setValue(provider.id).onChange(later(async (v) => {
 							this.plugin.switchProvider(v as ProviderId);
 							await this.save();
 							this.redraw();
-						});
+						}));
 					}),
 			},
 		];
@@ -187,10 +184,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 						t
 							.setPlaceholder(provider.baseUrl || "https://llm.example.com/v1")
 							.setValue(s.baseUrl)
-							.onChange(async (v) => {
+							.onChange(later(async (v) => {
 								s.baseUrl = v.trim();
 								await this.save();
-							}),
+							})),
 					),
 			});
 		}
@@ -209,10 +206,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				}),
 				render: (setting) =>
 					setting.addComponent((el) =>
-						new SecretComponent(this.app, el).setValue(s.apiKeySecret).onChange(async (v) => {
+						new SecretComponent(this.app, el).setValue(s.apiKeySecret).onChange(later(async (v) => {
 							s.apiKeySecret = v ?? "";
 							await this.save();
-						}),
+						})),
 					),
 			});
 		}
@@ -232,14 +229,14 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 						.addText((t) => {
 							t.setPlaceholder(provider.defaultModel || "Pick after loading models")
 								.setValue(s.model)
-								.onChange(async (v) => {
+								.onChange(later(async (v) => {
 									s.model = v.trim();
 									await this.save();
-								});
+								}));
 							t.inputEl.setAttr("list", "take-note-models");
 						})
 						.addButton((b) =>
-							b.setButtonText("Load models").onClick(async () => {
+							b.setButtonText("Load models").onClick(later(async () => {
 								b.setDisabled(true).setButtonText("Loading…");
 								try {
 									this.models = await providerModels({ provider: s.provider, baseUrl: s.baseUrl, apiKey: this.plugin.getApiKey() });
@@ -251,7 +248,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 								} finally {
 									b.setDisabled(false).setButtonText("Load models");
 								}
-							}),
+							})),
 						);
 				},
 			},
@@ -260,10 +257,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				desc: "So \"I will…\" in your notes becomes an action item owned by you.",
 				render: (setting) =>
 					setting.addText((t) =>
-						t.setValue(s.myName).onChange(async (v) => {
+						t.setValue(s.myName).onChange(later(async (v) => {
 							s.myName = v.trim();
 							await this.save();
-						}),
+						})),
 					),
 			},
 			{
@@ -273,10 +270,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 						d
 							.addOptions({ English: "English", "same as the meeting": "Same as the meeting", "Simplified Chinese": "简体中文", Malay: "Bahasa Melayu" })
 							.setValue(s.outputLanguage)
-							.onChange(async (v) => {
+							.onChange(later(async (v) => {
 								s.outputLanguage = v;
 								await this.save();
-							}),
+							})),
 					),
 			},
 			{
@@ -284,13 +281,13 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 				desc: "Longer transcripts are split into parts and merged. Keep this well under your model's context window.",
 				render: (setting) =>
 					setting.addText((t) =>
-						t.setValue(String(s.maxInputTokens)).onChange(async (v) => {
+						t.setValue(String(s.maxInputTokens)).onChange(later(async (v) => {
 							const n = parseInt(v, 10);
 							if (n > 1000) {
 								s.maxInputTokens = n;
 								await this.save();
 							}
-						}),
+						})),
 					),
 			},
 			{
@@ -300,10 +297,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					setting.addTextArea((t) => {
 						t.setPlaceholder("e.g. AK = Alice Kim (dev lead). Acme Bank is our client. Tickets go to the WEB project.")
 							.setValue(s.extraInstructions)
-							.onChange(async (v) => {
+							.onChange(later(async (v) => {
 								s.extraInstructions = v;
 								await this.save();
-							});
+							}));
 						t.inputEl.rows = 4;
 						t.inputEl.addClass("take-note-wide");
 					}),
@@ -319,10 +316,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 			desc,
 			render: (setting) =>
 				setting.addToggle((t) =>
-					t.setValue(s[key]).onChange(async (v) => {
+					t.setValue(s[key]).onChange(later(async (v) => {
 						s[key] = v;
 						await this.save();
-					}),
+					})),
 				),
 		});
 		const folder = (name: string, desc: string, key: "meetingsFolder" | "peopleFolder"): Row => ({
@@ -330,10 +327,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 			desc,
 			render: (setting) =>
 				setting.addText((t) =>
-					t.setValue(s[key]).onChange(async (v) => {
+					t.setValue(s[key]).onChange(later(async (v) => {
 						s[key] = v.trim().replace(/^\/+|\/+$/g, "");
 						await this.save();
-					}),
+					})),
 				),
 		});
 		return {
@@ -344,12 +341,12 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					desc: "Keep the Take Note panel (summary, transcript, your notes) in the right sidebar.",
 					render: (setting) =>
 						setting.addToggle((t) =>
-							t.setValue(s.showSidebar).onChange(async (v) => {
+							t.setValue(s.showSidebar).onChange(later(async (v) => {
 								s.showSidebar = v;
 								await this.save();
 								if (v) await this.plugin.openSidebar(true);
 								else this.plugin.closeSidebar();
-							}),
+							})),
 						),
 				},
 				{
@@ -358,21 +355,21 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					render: (setting) =>
 						setting
 							.addToggle((t) =>
-								t.setValue(s.showFloatingButton).onChange(async (v) => {
+								t.setValue(s.showFloatingButton).onChange(later(async (v) => {
 									s.showFloatingButton = v;
 									await this.save();
 									this.plugin.refreshFloatingButton();
-								}),
+								})),
 							)
 							.addExtraButton((b) =>
 								b
 									.setIcon("rotate-ccw")
 									.setTooltip("Move it back to the corner")
-									.onClick(async () => {
+									.onClick(later(async () => {
 										s.floatingButtonPos = null;
 										await this.save();
 										this.plugin.refreshFloatingButton();
-									}),
+									})),
 							),
 				},
 				folder("Meetings folder", "Where new meeting notes are created.", "meetingsFolder"),
@@ -397,10 +394,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					sl
 						.setLimits(min, max, 0.05)
 						.setValue(s[key])
-						.onChange(async (v) => {
+						.onChange(later(async (v) => {
 							s[key] = v;
 							await this.save();
-						}),
+						})),
 				),
 		});
 		return {
@@ -412,10 +409,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					aliases: ["diarization", "speaker separation"],
 					render: (setting) =>
 						setting.addToggle((t) =>
-							t.setValue(s.speakersEnabled).onChange(async (v) => {
+							t.setValue(s.speakersEnabled).onChange(later(async (v) => {
 								s.speakersEnabled = v;
 								await this.save();
-							}),
+							})),
 						),
 				},
 				{
@@ -423,13 +420,13 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					desc: "0 = detect automatically. Set it if you know, e.g. 4 for a 4-person meeting — this is the biggest accuracy boost.",
 					render: (setting) =>
 						setting.addText((t) =>
-							t.setValue(String(s.numSpeakers)).onChange(async (v) => {
+							t.setValue(String(s.numSpeakers)).onChange(later(async (v) => {
 								const n = parseInt(v, 10);
 								if (n >= 0 && n <= 20) {
 									s.numSpeakers = n;
 									await this.save();
 								}
-							}),
+							})),
 						),
 				},
 				slider("Voice match strictness", "How similar a voice must be to a saved voice to be named automatically (0.4 loose – 0.8 strict). Lower it if known people show up as \"Speaker N\"; raise it if people get mixed up.", "matchThreshold", 0.3, 0.9),
@@ -439,10 +436,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					desc: `Used to run speaker separation. Leave empty to auto-detect (found: ${findNode("") ?? "none"}).`,
 					render: (setting) =>
 						setting.addText((t) =>
-							t.setValue(s.nodePath).onChange(async (v) => {
+							t.setValue(s.nodePath).onChange(later(async (v) => {
 								s.nodePath = v.trim();
 								await this.save();
-							}),
+							})),
 						),
 				},
 				{
@@ -461,7 +458,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 						if (!voices.length) return;
 						setting.addDropdown((d) => {
 							d.addOption("", "Forget a voice…");
-							voices.forEach((v) => d.addOption(v, v));
+							for (const v of voices) d.addOption(v, v);
 							d.onChange((name) => {
 								if (!name) return;
 								forgetVoice(name);
@@ -481,10 +478,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 			name,
 			render: (setting) =>
 				setting.addToggle((t) =>
-					t.setValue(s[key]).onChange(async (v) => {
+					t.setValue(s[key]).onChange(later(async (v) => {
 						s[key] = v;
 						await this.save();
-					}),
+					})),
 				),
 		});
 		const path = (name: string, desc: string | undefined, key: "ffmpegPath" | "whisperPath" | "modelPath" | "vadModelPath"): Row => ({
@@ -492,10 +489,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 			desc,
 			render: (setting) =>
 				setting.addText((t) =>
-					t.setValue(s[key]).onChange(async (v) => {
+					t.setValue(s[key]).onChange(later(async (v) => {
 						s[key] = v.trim();
 						await this.save();
-					}),
+					})),
 				),
 		});
 		return {
@@ -506,7 +503,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 					desc: "For Zoom/Teams with headphones, pick an aggregate device (e.g. BlackHole + mic) to capture both sides.",
 					aliases: ["input device"],
 					render: (setting) =>
-						setting.addDropdown(async (d) => {
+						setting.addDropdown(later(async (d) => {
 							d.addOption("", "System default");
 							for (const dev of await listInputDevices()) {
 								d.addOption(dev.deviceId, dev.label || `Input ${dev.deviceId.slice(0, 6)}`);
@@ -515,20 +512,20 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 								s.micDeviceId = v;
 								await this.save();
 							});
-						}),
+						})),
 				},
 				{
 					name: "Discard short recordings",
 					desc: "Seconds. A recording stopped sooner than this is treated as an accidental tap: the audio goes to the trash, nothing is transcribed, and a new meeting note you didn't type in is removed. 0 keeps every recording.",
 					render: (setting) =>
 						setting.addText((t) =>
-							t.setValue(String(s.minRecordingSeconds)).onChange(async (v) => {
+							t.setValue(String(s.minRecordingSeconds)).onChange(later(async (v) => {
 								const n = parseInt(v, 10);
 								if (n >= 0 && n <= 600) {
 									s.minRecordingSeconds = n;
 									await this.save();
 								}
-							}),
+							})),
 						),
 				},
 				toggle("Transcribe automatically when recording stops", "autoTranscribe"),
@@ -541,10 +538,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 							d
 								.addOptions({ auto: "Auto-detect", en: "English", ms: "Malay", zh: "Chinese", id: "Indonesian", ja: "Japanese", ko: "Korean" })
 								.setValue(s.language)
-								.onChange(async (v) => {
+								.onChange(later(async (v) => {
 									s.language = v;
 									await this.save();
-								}),
+								})),
 						),
 				},
 				{
@@ -554,10 +551,10 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 						setting.addTextArea((t) => {
 							t.setPlaceholder("Kubernetes, Grafana, Acme Bank, onboarding flow")
 								.setValue(s.whisperPrompt)
-								.onChange(async (v) => {
+								.onChange(later(async (v) => {
 									s.whisperPrompt = v;
 									await this.save();
-								});
+								}));
 							t.inputEl.rows = 2;
 							t.inputEl.addClass("take-note-wide");
 						}),

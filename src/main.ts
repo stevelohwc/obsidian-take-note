@@ -8,8 +8,8 @@ import {
 	TFile,
 	TFolder,
 	normalizePath,
-	moment,
 } from "obsidian";
+import { webUtils } from "electron";
 import * as path from "path";
 import { DEFAULT_SETTINGS, TakeNoteSettingTab, TakeNoteSettings } from "./settings.ts";
 import { MeetingRecorder } from "./recorder.ts";
@@ -32,6 +32,7 @@ import {
 	TX_START,
 	collectSources,
 	createdValue,
+	stamp,
 	formatClock,
 	renderMeeting,
 	getBlock,
@@ -434,7 +435,7 @@ export default class TakeNote extends Plugin {
 		const fromFm = (typeof raw === "string" ? raw : "").match(/\d{4}-\d{2}-\d{2}/);
 		if (fromFm) return fromFm[0];
 		const fromName = f.basename.match(/\d{4}-\d{2}-\d{2}/);
-		return fromName ? fromName[0] : moment().format("YYYY-MM-DD");
+		return fromName ? fromName[0] : stamp("YYYY-MM-DD");
 	}
 
 	private updateStatus() {
@@ -594,9 +595,9 @@ export default class TakeNote extends Plugin {
 	}
 
 	async createMeetingNote(title?: string): Promise<TFile> {
-		const date = moment().format("YYYY-MM-DD");
-		const created = (await this.createdHasTime()) ? moment().format("YYYY-MM-DDTHH:mm") : date;
-		const base = safeFileName(`${date} – ${title ?? "Meeting " + moment().format("HHmm")}`);
+		const date = stamp("YYYY-MM-DD");
+		const created = (await this.createdHasTime()) ? stamp("YYYY-MM-DDTHH:mm") : date;
+		const base = safeFileName(`${date} – ${title ?? "Meeting " + stamp("HHmm")}`);
 		await this.ensureFolder(this.settings.meetingsFolder);
 		const p = this.uniquePath(this.settings.meetingsFolder, base, "md");
 		const content = [
@@ -626,7 +627,7 @@ export default class TakeNote extends Plugin {
 				fresh = await this.app.vault.read(note);
 				await this.openNote(note);
 			}
-			const name = `${moment().format("YYYY-MM-DD HHmm")} recording.${this.recorder.ext}`;
+			const name = `${stamp("YYYY-MM-DD HHmm")} recording.${this.recorder.ext}`;
 			const audioPath = await this.app.fileManager.getAvailablePathForAttachment(name, note.path);
 			await this.ensureFolder(path.posix.dirname(audioPath));
 			await this.recorder.start(this.absPath(audioPath), this.settings.micDeviceId || undefined);
@@ -725,8 +726,7 @@ export default class TakeNote extends Plugin {
 			// Electron: get the real path so large videos are never copied into the vault.
 			let filePath = "";
 			try {
-				const electron = require("electron") as { webUtils?: { getPathForFile?: (f: File) => string } };
-				filePath = electron.webUtils?.getPathForFile?.(file) ?? "";
+				filePath = webUtils?.getPathForFile?.(file) ?? "";
 			} catch {
 				/* older Electron */
 			}
@@ -865,7 +865,7 @@ export default class TakeNote extends Plugin {
 			const md = renderMeeting(result, {
 				linkPeople: s.linkPeople,
 				tasksEmoji: s.tasksEmoji,
-				generatedAt: moment().format("YYYY-MM-DD HH:mm"),
+				generatedAt: stamp("YYYY-MM-DD HH:mm"),
 				model: s.model,
 			});
 			await this.app.vault.process(note, (c) => upsertBlock(c, AI_START, AI_END, md, "afterTitle"));
