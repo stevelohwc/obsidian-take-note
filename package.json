@@ -1,6 +1,6 @@
 {
   "name": "obsidian-take-note",
-  "version": "1.3.6",
+  "version": "1.4.0",
   "description": "Obsidian plugin: record meetings, transcribe locally with Whisper, separate speakers, and turn meetings into summaries, action items, tickets and AI assignments with any OpenAI-compatible LLM.",
   "main": "main.js",
   "private": true,
