@@ -262,3 +262,22 @@ test("bubble layout: four sides, five each, migrated from the old single list", 
 	assert.deepEqual(flipSides(counts, { left: 900, right: 30, top: 500, bottom: 40 }, need), { x: true, y: false });
 	assert.deepEqual(flipSides(counts, { left: 900, right: 400, top: 500, bottom: 40 }, need), { x: false, y: false });
 });
+
+test("each part of a long chat starts with the day it is in", async () => {
+	const { carryDayHeaders, chunkText } = await import("../src/extract.ts");
+	const day1 = "--- 2026-11-19 (Thursday) ---";
+	const day2 = "--- 2026-11-20 (Friday) ---";
+	const chunks = [`${day1}\n[09:00] Alice: hi`, "[17:00] Bob: send it tomorrow", `${day2}\n[08:00] Bob: sent`, "[09:00] Alice: thanks"];
+	assert.deepEqual(carryDayHeaders(chunks), [
+		chunks[0],
+		`${day1}\n[17:00] Bob: send it tomorrow`,
+		chunks[2],
+		`${day2}\n[09:00] Alice: thanks`,
+	]);
+	// End to end with the real splitter: no part after the first lacks a day.
+	const long = [day1, ...Array.from({ length: 400 }, (_, i) => `[10:${String(i % 60).padStart(2, "0")}] Alice: message number ${i} about the launch plan`)].join("\n");
+	const parts = carryDayHeaders(chunkText(long, 2000));
+	assert.ok(parts.length > 1);
+	for (const p of parts) assert.ok(p.startsWith(day1));
+	assert.deepEqual(carryDayHeaders(["no days here", "still none"]), ["no days here", "still none"]);
+});

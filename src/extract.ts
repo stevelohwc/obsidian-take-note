@@ -169,6 +169,23 @@ export function chunkText(text: string, maxTokens: number): string[] {
 	return chunks;
 }
 
+const DAY_HEADER = /^--- \d{4}-\d{2}-\d{2}\b.*---$/;
+
+/**
+ * Chats mark each day once ("--- 2026-11-20 (Friday) ---"). Parts of a long chat are read
+ * separately, so a part that starts mid-day gets that day's line again, or "tomorrow" in it
+ * can't be dated.
+ */
+export function carryDayHeaders(chunks: string[]): string[] {
+	let day: string | null = null;
+	return chunks.map((chunk) => {
+		const lines = chunk.split("\n");
+		const out = day && !DAY_HEADER.test(lines.find((l) => l.trim()) ?? "") ? `${day}\n${chunk}` : chunk;
+		for (const l of lines) if (DAY_HEADER.test(l)) day = l;
+		return out;
+	});
+}
+
 /** Pull the JSON object out of a model reply (handles <think> blocks, code fences, trailing commas). */
 export function parseJsonReply(reply: string): unknown {
 	let text = reply.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
@@ -358,7 +375,8 @@ async function extractRaw(chat: ChatFn, input: ExtractInput, maxInputTokens: num
 	const system = systemPrompt(input);
 	const isChat = input.kind === "chat";
 	const budget = Math.max(2000, maxInputTokens - estimateTokens(system) - estimateTokens(input.notes) - 500);
-	const transcriptChunks = input.transcript.trim() ? chunkText(input.transcript, budget) : [""];
+	const chunks = input.transcript.trim() ? chunkText(input.transcript, budget) : [""];
+	const transcriptChunks = isChat ? carryDayHeaders(chunks) : chunks;
 
 	if (transcriptChunks.length === 1) {
 		return askJson(chat, system, userPrompt(input.notes, transcriptChunks[0]), isChat ? "Analysing chat" : "Analysing meeting");
