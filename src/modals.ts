@@ -1,6 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
-import * as os from "os";
-import * as path from "path";
+import { os, path } from "./node.ts";
 import { MeetingRecorder } from "./recorder.ts";
 import { formatClock, safeFileName } from "./render.ts";
 

@@ -1,8 +1,6 @@
 // Local storage for voice fingerprints and per-meeting speaker data.
 // Lives in ~/.take-note (this Mac only — never in the vault, so never in iCloud).
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { fs, os, path } from "./node.ts";
 import type { SpeakerPrint, VoiceProfiles } from "./speakers.ts";
 
 const MAX_PRINTS_PER_PERSON = 6;

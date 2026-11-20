@@ -310,7 +310,8 @@ function keywords(text: string): Set<string> {
 }
 
 function sourceLines(source: string): string[] {
-	return source.split(/\n|(?<=[.!?。！？])\s+/).filter((l) => l.trim());
+	// Split after sentence ends without a lookbehind (iOS before 16.4 can't run those).
+	return source.replace(/([.!?。！？])\s+/g, "$1\n").split("\n").filter((l) => l.trim());
 }
 
 /** Returns the priority justified by the source for an item described by `text`, or null. */

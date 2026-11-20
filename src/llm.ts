@@ -1,8 +1,8 @@
 // Minimal streaming client for OpenAI-compatible /chat/completions.
-// Uses Node's http(s) instead of fetch so there are no CORS issues inside Obsidian,
-// and streams so the router's 60-second idle timeout never closes the connection.
-import * as http from "http";
-import * as https from "https";
+// On desktop it uses Node's http(s) instead of fetch so there are no CORS issues inside Obsidian,
+// and streams so the router's 60-second idle timeout never closes the connection. On phones
+// (no Node) it sends one plain request through Obsidian's requestUrl instead.
+import { hasNode, http, https } from "./node.ts";
 
 export interface ChatMessage {
 	role: "system" | "user" | "assistant";
@@ -25,30 +25,42 @@ function endpoint(baseUrl: string, path: string): URL {
 	return new URL(baseUrl.replace(/\/+$/, "") + path);
 }
 
-function request(
-	url: URL,
-	method: string,
-	apiKey: string,
-	body: string | null,
-	signal?: AbortSignal,
-	extraHeaders: Record<string, string> = {},
-): Promise<http.IncomingMessage> {
+/** An HTTP response, however it was fetched: read it whole, or piece by piece as it streams. */
+interface Reply {
+	status: number;
+	contentType: string;
+	chunks: () => AsyncIterable<string>;
+}
+
+/** A plain (non-streaming) request that ignores CORS: Obsidian's requestUrl, set by the plugin. */
+export type PlainRequest = (req: { url: string; method: string; headers: Record<string, string>; body?: string }) => Promise<{
+	status: number;
+	headers: Record<string, string>;
+	text: string;
+}>;
+let plainRequest: PlainRequest | null = null;
+export function setPlainRequest(fn: PlainRequest | null) {
+	plainRequest = fn;
+}
+
+function nodeRequest(url: URL, method: string, headers: Record<string, string>, body: string | null, signal?: AbortSignal): Promise<Reply> {
 	const lib = url.protocol === "http:" ? http : https;
 	return new Promise((resolve, reject) => {
 		const req = lib.request(
 			url,
 			{
 				method,
-				headers: {
-					...extraHeaders,
-					...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-					"Content-Type": "application/json",
-					Accept: body ? "text/event-stream" : "application/json",
-					...(body ? { "Content-Length": Buffer.byteLength(body) } : {}),
-				},
+				headers: { ...headers, ...(body ? { "Content-Length": Buffer.byteLength(body) } : {}) },
 				timeout: 120_000, // socket idle timeout
 			},
-			resolve,
+			(res) =>
+				resolve({
+					status: res.statusCode ?? 0,
+					contentType: String(res.headers["content-type"] ?? ""),
+					chunks: async function* () {
+						for await (const c of res) yield (c as Buffer).toString("utf8");
+					},
+				}),
 		);
 		req.on("timeout", () => req.destroy(new Error("The LLM server stopped responding (120 s with no data).")));
 		req.on("error", reject);
@@ -59,6 +71,40 @@ function request(
 		if (body) req.write(body);
 		req.end();
 	});
+}
+
+/** Phones: one plain request through Obsidian (no CORS limits). The whole reply arrives at the end. */
+async function plainReply(url: URL, method: string, headers: Record<string, string>, body: string | null, signal?: AbortSignal): Promise<Reply> {
+	if (!plainRequest) throw new Error("No way to reach the AI on this device.");
+	if (signal?.aborted) throw new Error("Cancelled");
+	const plainBody = body ? JSON.stringify({ ...(JSON.parse(body) as object), stream: false }) : undefined;
+	const res = await plainRequest({ url: url.toString(), method, headers: { ...headers, Accept: "application/json" }, body: plainBody });
+	if (signal?.aborted) throw new Error("Cancelled");
+	const type = Object.entries(res.headers).find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "application/json";
+	return {
+		status: res.status,
+		contentType: type,
+		chunks: async function* () {
+			yield res.text;
+		},
+	};
+}
+
+function request(
+	url: URL,
+	method: string,
+	apiKey: string,
+	body: string | null,
+	signal?: AbortSignal,
+	extraHeaders: Record<string, string> = {},
+): Promise<Reply> {
+	const headers = {
+		...extraHeaders,
+		...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+		"Content-Type": "application/json",
+		Accept: body ? "text/event-stream" : "application/json",
+	};
+	return (hasNode ? nodeRequest : plainReply)(url, method, headers, body, signal);
 }
 
 /** The parts of OpenAI-compatible responses we read. */
@@ -82,10 +128,10 @@ function apiErrorText(j: ApiError): string | undefined {
 	return j.error?.message ?? j.message;
 }
 
-async function readAll(res: http.IncomingMessage): Promise<string> {
-	const chunks: Buffer[] = [];
-	for await (const c of res) chunks.push(c as Buffer);
-	return Buffer.concat(chunks).toString("utf8");
+async function readAll(res: Reply): Promise<string> {
+	let text = "";
+	for await (const c of res.chunks()) text += c;
+	return text;
 }
 
 function errorMessage(status: number | undefined, body: string): string {
@@ -102,7 +148,7 @@ function errorMessage(status: number | undefined, body: string): string {
 export async function listModels(cfg: Omit<LlmConfig, "model">): Promise<string[]> {
 	const res = await request(endpoint(cfg.baseUrl, "/models"), "GET", cfg.apiKey, null, undefined, cfg.headers);
 	const body = await readAll(res);
-	if ((res.statusCode ?? 0) >= 400) throw new Error(errorMessage(res.statusCode, body));
+	if (res.status >= 400) throw new Error(errorMessage(res.status, body));
 	const j = JSON.parse(body) as ModelList;
 	return (j.data ?? []).map((m) => m.id);
 }
@@ -123,10 +169,10 @@ export async function chatStream(
 			: { temperature: opts.temperature ?? 0.2, max_tokens: opts.maxTokens ?? 16000 }),
 	});
 	const res = await request(endpoint(cfg.baseUrl, "/chat/completions"), "POST", cfg.apiKey, body, opts.signal, cfg.headers);
-	if ((res.statusCode ?? 0) >= 400) throw new Error(errorMessage(res.statusCode, await readAll(res)));
+	if (res.status >= 400) throw new Error(errorMessage(res.status, await readAll(res)));
 
 	// Some servers ignore stream:true and reply with plain JSON.
-	if (!String(res.headers["content-type"] ?? "").includes("event-stream")) {
+	if (!res.contentType.includes("event-stream")) {
 		const j = JSON.parse(await readAll(res)) as ChatResponse;
 		return j.choices?.[0]?.message?.content ?? "";
 	}
@@ -135,8 +181,8 @@ export async function chatStream(
 	let reasoning = 0;
 	let buffer = "";
 	let finish: string | null = null;
-	for await (const chunk of res) {
-		buffer += (chunk as Buffer).toString("utf8");
+	for await (const chunk of res.chunks()) {
+		buffer += chunk;
 		let nl: number;
 		while ((nl = buffer.indexOf("\n")) !== -1) {
 			const line = buffer.slice(0, nl).trim();

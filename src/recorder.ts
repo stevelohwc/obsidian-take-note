@@ -1,7 +1,7 @@
 // Records the microphone (or any input device, e.g. a BlackHole aggregate device for
 // Zoom/Teams audio) and streams it straight to disk every second, so a crash or
 // closed laptop never loses the meeting.
-import * as fs from "fs";
+import { fs } from "./node.ts";
 
 export async function listInputDevices(): Promise<MediaDeviceInfo[]> {
 	try {
@@ -19,6 +19,7 @@ function pickMimeType(): { mime: string; ext: string } {
 		{ mime: "audio/ogg;codecs=opus", ext: "ogg" },
 		{ mime: "audio/mp4", ext: "m4a" },
 	];
+	if (typeof MediaRecorder === "undefined") return { mime: "", ext: "webm" }; // phones: recording is not offered
 	return options.find((o) => MediaRecorder.isTypeSupported(o.mime)) ?? { mime: "", ext: "webm" };
 }
 
