@@ -15,7 +15,8 @@ an LLM of your choice turn it into a structured meeting note:
 ![The floating mic button: idle, recording, paused and thinking](docs/mascot.png)
 
 It also works without recording: write rough notes or paste a Zoom / Teams / Meet transcript,
-then run one command.
+then run one command. Or **import a WhatsApp or Telegram chat** and get the same summary,
+action items and per-person notes from the conversation.
 
 ```markdown
 ## 📌 Action items
@@ -40,6 +41,8 @@ Ran the sync and approved the release plan.
 - Voice fingerprints are stored in `~/.take-note/` on your computer, outside the vault,
   so they never sync. You can forget a voice from the settings at any time.
 - Recording people may require their consent where you live. Tell people you are recording.
+- An imported chat is stored in the note and its text is sent to your LLM like any other
+  note. It contains other people's messages: use a local model for chats you'd rather keep private.
 
 ### Disclosures
 
@@ -47,13 +50,13 @@ As required by Obsidian's developer policies:
 
 - **Network use.** The plugin only connects to the LLM provider you choose (OpenAI,
   Anthropic, OpenRouter, or the server URL you enter), to list models and send your meeting
-  text. It sends no telemetry and has no ads. The
+  or chat text. It sends no telemetry and has no ads. The
   optional `scripts/setup-macos.sh` (which you run yourself, not the plugin) downloads
   Homebrew packages, the Whisper model from Hugging Face, and sherpa-onnx from npm and GitHub.
 - **Files outside your vault.** It reads and writes `~/.take-note/` (speaker-separation
   runtime and models installed by the setup script, voice fingerprints, per-meeting speaker
   data), reads the Whisper model you configure (default `~/.cache/whisper/`), uses temporary
-  files in your system temp folder while transcribing, and reads recordings you import.
+  files in your system temp folder while transcribing, and reads recordings and chat exports you import.
 - **Local programs.** It runs `ffmpeg`, `whisper-cli` and `node` from the paths in settings
   to convert, transcribe and separate speakers. It does not install or update anything itself.
 - **Microphone.** Used only while you are recording.
@@ -106,15 +109,18 @@ As required by Obsidian's developer policies:
 
 | You want to… | Do this |
 |---|---|
-| Record a meeting | Click the floating mic button (or the ribbon icon). Type your own notes under **My notes** while it records. Click the red timer in the status bar to stop. Transcript and AI notes appear automatically. A recording stopped within 20 s is treated as a mis-tap and discarded (change it in settings). |
+| Record a meeting | Click the floating mic button (or the ribbon icon). Type your own notes under **My notes** while it records, and watch the **live transcript** in the sidebar. Click the red timer in the status bar to stop. Transcript and AI notes appear automatically. A recording stopped within 20 s is treated as a mis-tap and discarded (change it in settings). |
 | Only take rough notes | **New meeting note**, type, then run **Summarize & extract…** |
 | Process a Zoom/Teams/Meet transcript | Paste it into a note and run **Summarize & extract…** |
 | Process a recording file | **Import a recording…** (audio or video; it is not copied into the vault) |
+| Process a WhatsApp or Telegram chat | **Import a chat…** Paste copied messages, or choose an export (see below) |
 | Re-run after editing your notes | Run **Summarize & extract…** again. It only replaces the AI section. |
 
 **Sidebar:** the Take Note panel in the right sidebar follows the meeting note you have open.
 **Summary** shows the AI notes (tick tasks right there), **Transcript** shows who said what with
-a search box, and clicking a timestamp plays the recording from that moment. **Notes** is a box for
+a search box, and clicking a timestamp plays the recording from that moment. While you record it shows a
+**live transcript**, about 15 seconds behind, made locally by Whisper (no tokens). It's a draft without speaker
+names; the full transcript replaces it when you stop. Turn it off under **Live transcript** in settings. **Notes** is a box for
 your own notes during the meeting; it saves into the note's "My notes" section, which the AI reads. Its toolbar records,
 summarizes, transcribes and names speakers. It comes back each time Obsidian starts; turn **Sidebar** off in settings if you don't want it.
 
@@ -139,6 +145,28 @@ has learned are named automatically, and new voices show as `Speaker 1`, `Speake
 - **Accuracy:** set **Number of speakers** when you know it; that helps most. If people get
   mixed up, adjust **Voice match strictness** and **Separation sensitivity**.
 
+### Chats (WhatsApp, Telegram)
+
+Run **Import a chat…** (command palette, or right-click the floating button). Paste messages
+you copied, or choose an export file:
+
+| App | How to export | File to choose |
+|---|---|---|
+| WhatsApp (phone) | Open the chat → contact or group name → **Export chat** → *Without media* | the `.zip` (iPhone) or `.txt` (Android) |
+| Telegram Desktop | Open the chat → ⋮ → **Export chat history**, format *Machine-readable JSON* | `result.json` |
+| Telegram Desktop (HTML export) | Same, format *HTML* | `messages.html` (select `messages2.html`… too for long chats) |
+
+It shows what it found (messages, people, date range). Pick **which one is you**, so your
+messages get your name from settings and the AI knows which commitments are yours, and
+optionally limit the dates. Long histories are read in several parts, so narrowing the dates
+makes it faster and cheaper.
+
+The note gets a `chat` tag, `chat_start` / `chat_end` dates and everyone who wrote in
+`people`; the messages go in a **Chat** section, one line per message with a line for each
+day. Relative dates ("tomorrow", "Friday") are resolved from the day each message was sent.
+Photos, voice messages and files show up as markers like `[photo]`; the AI can't see them.
+Text it doesn't recognise as a chat is imported as is, and the AI still reads it.
+
 ### Online meetings with headphones
 
 The microphone only hears you. To capture everyone, either use the meeting app's own
@@ -152,6 +180,7 @@ that device under Settings → Microphone.
 |---|---|
 | `src/recorder.ts` | Microphone → `.webm`, written to disk every second so a crash loses nothing |
 | `src/transcribe.ts` | ffmpeg → whisper-cli, with speaker separation running in parallel |
+| `src/live.ts`, `src/live-audio.ts` | Live transcript: decodes the recording as it is written and transcribes ~12-second pieces cut at pauses |
 | `helper/speakers.cjs` | sherpa-onnx speaker separation + voice fingerprints (runs in a Node subprocess) |
 | `src/speakers.ts` | Merging split speakers, matching saved voices, labelling transcript lines |
 | `src/providers.ts` | Provider presets (OpenAI, Claude, OpenRouter, Ollama, LM Studio, custom) |
