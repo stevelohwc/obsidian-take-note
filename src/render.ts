@@ -143,12 +143,19 @@ export function renderMeeting(m: MeetingNotes, o: RenderOptions): string {
 	return out.join("\n");
 }
 
-export function renderTranscript(text: string, audioLink: string | null, meta: string, speakerSession?: string): string {
+/** The transcript block. `label` is "Chat" for imported chats (the sidebar reads either). */
+export function renderTranscript(
+	text: string,
+	audioLink: string | null,
+	meta: string,
+	speakerSession?: string,
+	label: "Transcript" | "Chat" = "Transcript",
+): string {
 	const lines = [TX_START];
 	if (speakerSession) lines.push(`<!-- take-note:speakers:${speakerSession} -->`);
-	lines.push("## Transcript");
+	lines.push(`## ${label}`);
 	if (audioLink) lines.push(audioLink, "");
-	lines.push(`> [!quote]- Transcript (${meta})`, quote(text.trim() || "(no speech detected)"), TX_END);
+	lines.push(`> [!quote]- ${label} (${meta})`, quote(text.trim() || "(no speech detected)"), TX_END);
 	return lines.join("\n");
 }
 

@@ -3,11 +3,13 @@ import { ItemView, Keymap, MarkdownRenderer, TFile, type WorkspaceLeaf, debounce
 import type TakeNote from "./main.ts";
 import { MASCOT_ICON, type Mood } from "./mascot.ts";
 import { AI_END, AI_START, TX_END, TX_START, getBlock } from "./render.ts";
+import { clock } from "./speakers.ts";
+import type { LiveLine } from "./live.ts";
 import { type TranscriptLine, embedTarget, getMyNotes, parseTranscript, setMyNotes, setTaskInAiBlock } from "./sidebar-data.ts";
 
 export const VIEW_TYPE = "take-note-sidebar";
 
-type Tab = "summary" | "transcript" | "notes";
+export type Tab = "summary" | "transcript" | "notes";
 
 export class TakeNoteView extends ItemView {
 	private note: TFile | null = null;
@@ -27,6 +29,7 @@ export class TakeNoteView extends ItemView {
 		subKeyShown: string;
 		toolbarKeyShown: string;
 	} | null = null;
+	private live: { list: HTMLElement; state: HTMLElement; waiting: HTMLElement | null; shown: number } | null = null;
 	private notesEl: HTMLTextAreaElement | null = null;
 	private notesStateEl: HTMLElement | null = null;
 	private pendingNotes: { note: TFile; text: string } | null = null;
@@ -196,6 +199,7 @@ export class TakeNoteView extends ItemView {
 		this.audio?.pause();
 		this.audio = null;
 		this.lineEls = [];
+		this.live = null;
 		this.bodyEl.empty();
 
 		if (!note) {
@@ -269,6 +273,11 @@ export class TakeNoteView extends ItemView {
 	private renderTranscript(pane: HTMLElement, note: TFile, content: string) {
 		const block = getBlock(content, TX_START, TX_END);
 		const parsed = block === null ? null : parseTranscript(block);
+		const live = this.plugin.liveTranscript(note);
+		if (live && (!parsed || !parsed.lines.length || parsed.meta === "pending")) {
+			this.renderLive(pane, live);
+			return;
+		}
 		if (!parsed || !parsed.lines.length) {
 			this.emptyState(
 				parsed ? "The recording hasn't been transcribed yet." : "No transcript in this note yet.",
@@ -309,6 +318,57 @@ export class TakeNoteView extends ItemView {
 			draw();
 		});
 		draw();
+	}
+
+	/** Switch to a tab (the floating button's "Show the transcript"). */
+	showTab(tab: Tab) {
+		this.tab = tab;
+		void this.render();
+	}
+
+	/** Called by the plugin when the live transcript of `note` changes. */
+	liveChanged(note: TFile) {
+		if (note !== this.note || this.tab !== "transcript") return;
+		const live = this.plugin.liveTranscript(note);
+		if (live && this.live?.list.isConnected) this.appendLive(live);
+		else void this.render(); // live started or ended: switch between draft and transcript
+	}
+
+	private renderLive(pane: HTMLElement, live: { lines: LiveLine[]; listening: boolean; error: string | null }) {
+		const head = pane.createDiv({ cls: "take-note-side-live-head" });
+		head.createSpan({ cls: "take-note-side-live-dot" });
+		const state = head.createSpan();
+		const list = pane.createDiv({ cls: "take-note-side-lines take-note-side-live" });
+		const waiting = list.createDiv({ cls: "take-note-side-none", text: "Listening… the first lines appear about 15 seconds in." });
+		this.live = { list, state, waiting, shown: 0 };
+		this.appendLive(live);
+	}
+
+	private appendLive(live: { lines: LiveLine[]; listening: boolean; error: string | null }) {
+		const view = this.live;
+		if (!view) return;
+		view.list.parentElement?.toggleClass("is-listening", live.listening);
+		view.state.setText(
+			live.error
+				? `Live transcript stopped (${live.error}). The recording continues.`
+				: live.listening
+					? "Live transcript (draft). Speaker names are added when you stop."
+					: "Draft. The full transcript with speaker names replaces it when ready.",
+		);
+		if (view.shown >= live.lines.length) {
+			if (!live.listening) view.waiting?.setText(live.error ? "" : "Nothing was transcribed live.");
+			return;
+		}
+		view.waiting?.remove();
+		view.waiting = null;
+		// Follow new lines only if you're already at the bottom, so reading back isn't interrupted.
+		const scroller = this.contentEl;
+		const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+		for (const line of live.lines.slice(view.shown)) {
+			this.drawLine(view.list, { seconds: line.seconds, clock: clock(line.seconds * 1000), speaker: null, text: line.text }, []);
+		}
+		view.shown = live.lines.length;
+		if (atBottom) scroller.scrollTop = scroller.scrollHeight;
 	}
 
 	private editingNotes(): boolean {
@@ -371,7 +431,7 @@ export class TakeNoteView extends ItemView {
 	private drawLine(list: HTMLElement, line: TranscriptLine, speakers: string[]) {
 		const row = list.createDiv({ cls: "take-note-side-line" });
 		if (line.clock) {
-			const time = row.createEl("button", { cls: "take-note-side-time", text: line.clock.replace(/^00:/, "") });
+			const time = row.createEl("button", { cls: "take-note-side-time", text: line.seconds === null ? line.clock : line.clock.replace(/^00:/, "") });
 			if (this.audio && line.seconds !== null) {
 				const at = line.seconds;
 				setTooltip(time, "Play the recording from here");

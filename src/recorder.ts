@@ -33,6 +33,8 @@ export class MeetingRecorder {
 	private writeError: Error | null = null;
 	readonly ext: string;
 	private readonly mime: string;
+	/** Called with each piece of audio after it is written to the file (for the live transcript). */
+	onData: ((chunk: Buffer) => void) | null = null;
 
 	constructor() {
 		const t = pickMimeType();
@@ -74,7 +76,13 @@ export class MeetingRecorder {
 			const fd = this.fd;
 			this.writeChain = this.writeChain.then(async () => {
 				try {
-					fs.writeSync(fd, Buffer.from(await e.data.arrayBuffer()));
+					const chunk = Buffer.from(await e.data.arrayBuffer());
+					fs.writeSync(fd, chunk);
+					try {
+						this.onData?.(chunk);
+					} catch {
+						/* the live transcript must never break the recording */
+					}
 				} catch (err) {
 					this.writeError = err as Error;
 				}

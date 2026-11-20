@@ -13,15 +13,18 @@ import { webUtils } from "electron";
 import * as path from "path";
 import { DEFAULT_SETTINGS, TakeNoteSettingTab, TakeNoteSettings } from "./settings.ts";
 import { MeetingRecorder } from "./recorder.ts";
-import { type SpeakerConfig, embedWav, toWav, transcribeFile } from "./transcribe.ts";
+import { type SpeakerConfig, checkWhisperSetup, embedWav, toWav, transcribeFile } from "./transcribe.ts";
+import { type LiveLine, LiveTranscriber } from "./live.ts";
 import HELPER_SOURCE from "../helper/speakers.cjs";
 import { addVoice, findNode, loadSession, loadVoices, newSessionId, saveSession, speakerSetupProblems } from "./voices.ts";
 import { renameSpeaker, transcriptSpeakers } from "./speakers.ts";
 import { NameSpeakersModal, VoiceSampleModal } from "./modals.ts";
+import { type ChatImport, ImportChatModal } from "./chat-modal.ts";
 import * as fs from "fs";
 import * as os from "os";
 import { PROVIDERS, type ProviderId, inferProvider, providerChat } from "./providers.ts";
-import { FloatingButton } from "./fab.ts";
+import { type FabAction, FloatingButton } from "./fab.ts";
+import { BUBBLES, type BubbleId, SIDES, type Side, normalizeLayout } from "./bubbles.ts";
 import { MASCOT_ICON, type Mood, registerMascotIcons } from "./mascot.ts";
 import { TakeNoteView, VIEW_TYPE } from "./view.ts";
 import { extractMeeting, type MeetingNotes } from "./extract.ts";
@@ -95,6 +98,8 @@ export default class TakeNote extends Plugin {
 	private jobs = new Map<TFile, AbortController>(); // note -> running job (the TFile survives renames; its path does not)
 	private fab: FloatingButton | null = null;
 	private busyText = "Working…";
+	/** Live transcript of the current (or just finished) recording, until the full transcript replaces it. */
+	private live: { note: TFile; t: LiveTranscriber } | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -163,9 +168,7 @@ export default class TakeNote extends Plugin {
 			checkCallback: (checking) => {
 				if (!this.recording) return false;
 				if (!checking) {
-					if (this.recorder.isPaused) this.recorder.resume();
-					else this.recorder.pause();
-					this.updateStatus();
+					this.togglePause();
 				}
 				return true;
 			},
@@ -194,6 +197,11 @@ export default class TakeNote extends Plugin {
 			id: "import-audio",
 			name: "Import a recording (Zoom/Teams/phone audio or video) and transcribe",
 			callback: () => this.importRecording(),
+		});
+		this.addCommand({
+			id: "import-chat",
+			name: "Import a chat (WhatsApp / Telegram export or pasted messages)",
+			callback: () => this.importChat(),
 		});
 		this.addCommand({
 			id: "name-speakers",
@@ -228,6 +236,7 @@ export default class TakeNote extends Plugin {
 		this.fab?.destroy();
 		this.jobs.forEach((c) => c.abort());
 		// Flush audio so nothing is lost (best effort).
+		this.live?.t.stop();
 		if (this.recording) this.recorder.stop().catch(() => {});
 	}
 
@@ -237,6 +246,10 @@ export default class TakeNote extends Plugin {
 		// Settings from before providers existed: work out which one the URL points at.
 		if (saved && !saved.provider) this.settings.provider = inferProvider(this.settings.baseUrl);
 		delete (this.settings as Partial<Record<"sidebarAdded", unknown>>).sidebarAdded; // replaced by showSidebar
+		// Bubbles: known ones only, each once; older versions kept one list (a row, then a column).
+		const legacy = (saved as Partial<Record<"fabBubbles", unknown>> | null)?.fabBubbles;
+		this.settings.fabLayout = normalizeLayout(saved?.fabLayout, legacy);
+		delete (this.settings as Partial<Record<"fabBubbles", unknown>>).fabBubbles;
 	}
 
 	/** Switch LLM provider, remembering the old one's URL, model and key for switching back. */
@@ -271,8 +284,110 @@ export default class TakeNote extends Plugin {
 				this.settings.floatingButtonPos = pos;
 				void this.saveSettings();
 			},
+			actions: () => this.fabActions(),
 		});
 		this.updateStatus();
+	}
+
+	/** The bubbles on each side of the floating button, as laid out in settings. */
+	private fabActions(): Record<Side, FabAction[]> {
+		const out: Record<Side, FabAction[]> = { left: [], top: [], right: [], bottom: [] };
+		if (!this.settings.fabBubblesOn) return out;
+		for (const side of SIDES) {
+			for (const id of this.settings.fabLayout[side]) {
+				const a = this.bubbleAction(id);
+				if (a) out[side].push(a);
+			}
+		}
+		return out;
+	}
+
+	/** What a bubble does right now, or null when it doesn't apply (Pause when not recording…). */
+	private bubbleAction(id: BubbleId): FabAction | null {
+		const rec = this.recording;
+		const note = this.activeNote();
+		const icon = BUBBLES[id].icon;
+		switch (id) {
+			case "note":
+				return { icon, title: rec ? "Go to the note being recorded" : "Go to the current meeting note", run: () => void this.goToCurrentNote() };
+			case "record":
+				return {
+					icon: rec ? "square" : icon,
+					title: rec ? "Stop recording" : this.isMeetingNote(note) ? "Record in this note" : "Record in a new meeting note",
+					run: () => this.toggleRecording(),
+				};
+			case "recordNew":
+				return {
+					icon: rec ? "square" : icon,
+					title: rec ? "Stop recording" : "Record in a new meeting note",
+					run: () => void (rec ? this.stopRecording() : this.startRecording("new")),
+				};
+			case "transcript":
+				return { icon, title: "Show the transcript", run: () => void this.showTranscript() };
+			case "import":
+				return {
+					icon,
+					title: "Import a chat or recording (new note)…",
+					run: (evt) => {
+						const menu = new Menu();
+						menu.addItem((i) => i.setTitle("Import a chat (WhatsApp / Telegram)…").setIcon("messages-square").onClick(() => this.importChat()));
+						menu.addItem((i) => i.setTitle("Import a recording (audio / video)…").setIcon("upload").onClick(() => this.importRecording()));
+						menu.showAtMouseEvent(evt);
+					},
+				};
+			case "importChat":
+				return { icon, title: "Import a chat (new note)…", run: () => this.importChat() };
+			case "importRecording":
+				return { icon, title: "Import a recording (new note)…", run: () => this.importRecording() };
+			case "summarize":
+				return note ? { icon, title: "Summarize this note with AI", run: () => void this.processNote(note) } : null;
+			case "pause": {
+				if (!rec) return null;
+				const paused = this.recorder.isPaused;
+				return { icon: paused ? "play" : icon, title: paused ? "Resume recording" : "Pause recording", run: () => this.togglePause() };
+			}
+			case "speakers":
+				return note ? { icon, title: "Name the speakers", run: () => void this.nameSpeakers(note) } : null;
+			case "sidebar":
+				return { icon, title: "Open the sidebar", run: () => void this.openSidebar(true) };
+			case "newNote":
+				return { icon, title: "New meeting note", run: () => void this.createMeetingNote().then((f) => this.openNote(f)) };
+			case "cancel":
+				return this.jobs.size ? { icon, title: "Cancel the running job", run: () => this.cancelJobs() } : null;
+		}
+	}
+
+
+	/**
+	 * The meeting note you're working on: the one being recorded or processed, else the open
+	 * note if it's a meeting note, else the most recently edited one.
+	 */
+	private currentMeetingNote(): TFile | null {
+		if (this.recording) return this.recording.note;
+		if (this.live) return this.live.note;
+		const busy = [...this.jobs.keys()][0];
+		if (busy) return busy;
+		const open = this.activeNote();
+		if (open && this.isMeetingNote(open)) return open;
+		const notes = this.app.vault.getMarkdownFiles().filter((f) => this.isMeetingNote(f));
+		return notes.sort((a, b) => b.stat.mtime - a.stat.mtime)[0] ?? null;
+	}
+
+	private async goToCurrentNote(): Promise<TFile | null> {
+		const note = this.currentMeetingNote();
+		if (!note) {
+			new Notice("No meeting notes yet. Click the mic to record one.");
+			return null;
+		}
+		if (this.activeNote() !== note) await this.openNote(note);
+		return note;
+	}
+
+	/** Open the current meeting note with the sidebar on its Transcript tab. */
+	private async showTranscript() {
+		if (!(await this.goToCurrentNote())) return;
+		await this.openSidebar(true);
+		this.sidebarViews().forEach((v) => v.showTab("transcript"));
 	}
 
 	private fabMenu(evt: MouseEvent) {
@@ -297,6 +412,7 @@ export default class TakeNote extends Plugin {
 		}
 		add("Open the sidebar", "panel-right", () => void this.openSidebar(true));
 		add("Import a recording…", "upload", () => this.importRecording());
+		add("Import a chat…", "messages-square", () => this.importChat());
 		add("New meeting note", "file-plus", () => {
 			void this.createMeetingNote().then((f) => this.openNote(f));
 		});
@@ -346,7 +462,10 @@ export default class TakeNote extends Plugin {
 	togglePause() {
 		if (!this.recording) return;
 		if (this.recorder.isPaused) this.recorder.resume();
-		else this.recorder.pause();
+		else {
+			this.recorder.pause();
+			this.live?.t.flush(); // show what was said so far
+		}
 		this.updateStatus();
 	}
 
@@ -393,7 +512,13 @@ export default class TakeNote extends Plugin {
 	isMeetingNote(f: TFile | null): boolean {
 		if (!f) return false;
 		const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-		return asList(fm?.tags).some((t) => t === "meeting") || f.path.startsWith(this.settings.meetingsFolder + "/");
+		return asList(fm?.tags).some((t) => t === "meeting" || t === "chat") || f.path.startsWith(this.settings.meetingsFolder + "/");
+	}
+
+	/** A note made by "Import a chat" (the AI reads it as messages, not a meeting). */
+	private isChatNote(f: TFile): boolean {
+		const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+		return asList(fm?.tags).includes("chat") || typeof fm?.chat === "string";
 	}
 
 	private absPath(vaultPath: string): string {
@@ -431,7 +556,8 @@ export default class TakeNote extends Plugin {
 
 	private noteDate(f: TFile): string {
 		const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-		const raw: unknown = fm?.created ?? fm?.date;
+		// A chat's date is its last message, not the day it was imported.
+		const raw: unknown = fm?.chat_end ?? fm?.created ?? fm?.date;
 		const fromFm = (typeof raw === "string" ? raw : "").match(/\d{4}-\d{2}-\d{2}/);
 		if (fromFm) return fromFm[0];
 		const fromName = f.basename.match(/\d{4}-\d{2}-\d{2}/);
@@ -632,6 +758,7 @@ export default class TakeNote extends Plugin {
 			await this.ensureFolder(path.posix.dirname(audioPath));
 			await this.recorder.start(this.absPath(audioPath), this.settings.micDeviceId || undefined);
 			this.recording = { note, audioPath, fresh };
+			this.startLive(note);
 			this.updateStatus();
 			new Notice("🔴 Recording. Type your own notes under \"My notes\" — click the timer in the status bar to stop.");
 		} catch (e) {
@@ -656,9 +783,15 @@ export default class TakeNote extends Plugin {
 		} catch (e) {
 			new Notice((e as Error).message, 10000);
 		}
+		// Transcribe the last few seconds, then stop listening. The draft stays on screen until
+		// the full transcript replaces it.
+		this.recorder.onData = null;
+		const live = this.live;
+		if (live) void live.t.finish().then(() => this.liveChanged(live.note));
 		this.updateStatus();
 		const min = this.settings.minRecordingSeconds;
 		if (min > 0 && ms < min * 1000) {
+			this.clearLive();
 			await this.discardRecording(rec, ms, min);
 			return;
 		}
@@ -697,6 +830,44 @@ export default class TakeNote extends Plugin {
 				"\nChange this under Settings → Take Note → Discard short recordings.",
 			8000,
 		);
+	}
+
+	// ---------- live transcript ----------
+
+	/** The live draft for this note, if it has one (while recording, and until the full transcript is in). */
+	liveTranscript(note: TFile): { lines: LiveLine[]; listening: boolean; error: string | null } | null {
+		if (this.live?.note !== note) return null;
+		const t = this.live.t;
+		return { lines: t.lines, listening: t.listening, error: t.error };
+	}
+
+	private startLive(note: TFile) {
+		this.clearLive();
+		const s = this.settings;
+		if (!s.liveTranscript) return;
+		const cfg = { ...s, prompt: [s.whisperPrompt, this.knownPeople().join(", ")].filter(Boolean).join(", ") };
+		if (checkWhisperSetup(cfg).length) return; // the full transcription reports what is missing
+		try {
+			const t = new LiveTranscriber(cfg, () => this.liveChanged(note));
+			t.start();
+			this.recorder.onData = (chunk) => t.push(chunk);
+			this.live = { note, t };
+		} catch (e) {
+			console.error("Take Note: live transcript could not start", e);
+		}
+		this.liveChanged(note);
+	}
+
+	private clearLive() {
+		const note = this.live?.note;
+		this.recorder.onData = null;
+		this.live?.t.stop();
+		this.live = null;
+		if (note) this.liveChanged(note);
+	}
+
+	private liveChanged(note: TFile) {
+		this.sidebarViews().forEach((v) => v.liveChanged(note));
 	}
 
 	// ---------- transcription ----------
@@ -743,6 +914,35 @@ export default class TakeNote extends Plugin {
 		input.click();
 	}
 
+	private importChat() {
+		const s = this.settings;
+		new ImportChatModal(this.app, { myName: s.myName, maxInputTokens: s.maxInputTokens, summarize: s.autoProcess }, async (c) => {
+			const note = await this.createChatNote(c);
+			await this.openNote(note);
+			new Notice(`💬 Imported ${c.meta}.`);
+			if (s.autoProcess) await this.processNote(note);
+		}).open();
+	}
+
+	/** A note holding an imported chat, named after its last day, in the meetings folder. */
+	private async createChatNote(c: ChatImport): Promise<TFile> {
+		const date = c.end ?? stamp("YYYY-MM-DD");
+		await this.ensureFolder(this.settings.meetingsFolder);
+		const p = this.uniquePath(this.settings.meetingsFolder, safeFileName(`${date} – ${c.title}`), "md");
+		const body = [`# ${path.basename(p, ".md")}`, "", "## My notes", "- ", "", renderTranscript(c.transcript, null, c.meta, undefined, "Chat"), ""].join("\n");
+		const note = await this.app.vault.create(p, body);
+		const withTime = await this.createdHasTime();
+		await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
+			fm.tags = ["chat"];
+			fm.created = withTime ? stamp("YYYY-MM-DDTHH:mm") : stamp("YYYY-MM-DD");
+			fm.chat = c.source;
+			if (c.start) fm.chat_start = c.start;
+			if (c.end) fm.chat_end = c.end;
+			fm.people = c.people;
+		});
+		return note;
+	}
+
 	/**
 	 * Transcribe `audio` (a vault path, or an absolute path when `external`) into the note,
 	 * then run the AI if enabled.
@@ -787,6 +987,7 @@ export default class TakeNote extends Plugin {
 				.filter(Boolean)
 				.join(" · ");
 			await this.app.vault.process(note, (c) => upsertBlock(c, TX_START, TX_END, renderTranscript(res.text, audioLink, meta, session), "end"));
+			if (this.live?.note === note) this.clearLive();
 			let msg = `✅ Transcribed ${formatClock(res.durationSec * 1000)} of audio in ${formatClock(Date.now() - started)}.`;
 			if (speakerCount) {
 				const unknown = speakerCount - (res.recognised?.length ?? 0);
@@ -833,6 +1034,7 @@ export default class TakeNote extends Plugin {
 			return;
 		}
 
+		const chat = this.isChatNote(note);
 		const ctrl = new AbortController();
 		this.jobs.set(note, ctrl);
 		const s = this.settings;
@@ -858,6 +1060,7 @@ export default class TakeNote extends Plugin {
 					outputLanguage: s.outputLanguage,
 					knownPeople: this.knownPeople(),
 					extraInstructions: s.extraInstructions,
+					kind: chat ? "chat" : "meeting",
 				},
 				s.maxInputTokens,
 			);
@@ -872,7 +1075,7 @@ export default class TakeNote extends Plugin {
 			const withTime = await this.createdHasTime();
 			await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
 				const tags = new Set<string>(asList(fm.tags));
-				tags.add("meeting");
+				tags.add(chat ? "chat" : "meeting");
 				fm.tags = [...tags];
 				fm.created = createdValue(fm.created, { withTime, content, fileCreated: note.stat.ctime, fallbackDate: this.noteDate(note) });
 				const people = new Set<string>(asList(fm.people));
@@ -891,7 +1094,7 @@ export default class TakeNote extends Plugin {
 				.filter(([n]) => n)
 				.map(([n, l]) => `${n} ${l}`)
 				.join(", ");
-			progress.done(`✅ Meeting processed in ${formatClock(Date.now() - started)}${counts ? ": " + counts : ""}.`, 8000);
+			progress.done(`✅ ${chat ? "Chat" : "Meeting"} processed in ${formatClock(Date.now() - started)}${counts ? ": " + counts : ""}.`, 8000);
 		} catch (e) {
 			progress.done("❌ AI step failed: " + (e as Error).message, 15000);
 		} finally {

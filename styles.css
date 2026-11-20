@@ -76,6 +76,49 @@
 .take-note-fab.is-pinned .take-note-fab-label { opacity: 1; transform: none; }
 .take-note-fab.is-dragging .take-note-fab-label { opacity: 0; }
 
+/* Bubbles: a line on each side of the mascot, each starting next to it (layout set in settings). */
+.take-note-fab-actions {
+	position: absolute;
+	display: flex;
+	gap: 8px;
+	pointer-events: none;
+	visibility: hidden;
+}
+.take-note-fab-actions.is-left { top: 50%; right: calc(52px + 8px); flex-direction: row-reverse; transform: translateY(-50%); }
+.take-note-fab-actions.is-right { top: 50%; left: calc(100% + 8px); flex-direction: row; transform: translateY(-50%); }
+.take-note-fab-actions.is-top { right: 6px; bottom: calc(100% + 8px); flex-direction: column-reverse; }
+.take-note-fab-actions.is-bottom { right: 6px; top: calc(100% + 8px); flex-direction: column; }
+.take-note-fab.is-open .take-note-fab-actions { pointer-events: auto; visibility: visible; }
+.take-note-fab-action {
+	width: 40px;
+	height: 40px;
+	padding: 0;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--icon-color);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	cursor: var(--cursor);
+	opacity: 0;
+	transition: opacity 0.12s ease, transform 0.12s ease;
+	transition-delay: calc(var(--take-note-fab-i, 0) * 30ms);
+}
+/* Each bubble slides out from the mascot. */
+.take-note-fab .is-left .take-note-fab-action { transform: translateX(8px) scale(0.85); }
+.take-note-fab .is-right .take-note-fab-action { transform: translateX(-8px) scale(0.85); }
+.take-note-fab .is-top .take-note-fab-action { transform: translateY(8px) scale(0.85); }
+.take-note-fab .is-bottom .take-note-fab-action { transform: translateY(-8px) scale(0.85); }
+.take-note-fab.is-open .take-note-fab-actions .take-note-fab-action { opacity: 1; transform: none; }
+/* Solid, so note text never shows through: beats the theme's own button colours (button:not(.clickable-icon)). */
+.take-note-fab .take-note-fab-action { background-color: var(--background-secondary-alt); }
+.take-note-fab .take-note-fab-action:hover { color: var(--icon-color-hover); background-color: var(--background-secondary); box-shadow: var(--shadow-l); }
+.take-note-fab-action:focus-visible { box-shadow: 0 0 0 3px var(--interactive-accent); }
+.take-note-fab-action .svg-icon { width: 18px; height: 18px; }
+/* The bubbles take the label's place while they're out. */
+.take-note-fab.is-open .take-note-fab-label { opacity: 0; }
+
 @keyframes take-note-bob { 50% { transform: translateY(-3px); } }
 @keyframes take-note-ring { 0% { box-shadow: 0 0 0 0 rgba(var(--color-red-rgb), 0.45); } 100% { box-shadow: 0 0 0 14px rgba(var(--color-red-rgb), 0); } }
 @keyframes take-note-wave { 50% { opacity: 0.25; } }
@@ -151,3 +194,169 @@
 	padding: 8px 10px;
 }
 .take-note-side-saved { font-size: var(--font-ui-smaller); color: var(--text-faint); text-align: right; min-height: 1.4em; }
+
+/* Live transcript while recording */
+.take-note-side-live-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.take-note-side-live-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--text-faint); }
+.take-note-side-pane.is-listening .take-note-side-live-dot { background: var(--color-red); }
+@media (prefers-reduced-motion: no-preference) {
+	.take-note-side-pane.is-listening .take-note-side-live-dot { animation: take-note-wave 1.2s ease-in-out infinite; }
+}
+
+/* Import a chat */
+.take-note-chat-import .take-note-chat-paste {
+	width: 100%;
+	min-height: 10em;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+.take-note-chat-import .take-note-chat-info {
+	margin: var(--size-4-2) 0;
+}
+.take-note-chat-import .take-note-chat-info.mod-warning {
+	color: var(--text-error);
+}
+
+/* Settings: the bubble editor, a preview of the button with a line of bubbles on each side */
+.take-note-bubble-editor-row { flex-wrap: wrap; }
+.take-note-bubble-editor { flex-basis: 100%; margin-top: var(--size-4-3); }
+.take-note-bubble-stage {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--size-4-3);
+	padding: var(--size-4-4);
+	overflow-x: auto;
+	border-radius: var(--radius-l);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+}
+.take-note-bubble-cross {
+	display: grid;
+	grid-template-columns: minmax(48px, auto) 56px minmax(48px, auto);
+	grid-template-areas: ". top ." "left mic right" ". bottom .";
+	gap: 8px;
+}
+.take-note-bubble-mic {
+	grid-area: mic;
+	width: 56px;
+	height: 56px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: var(--background-secondary-alt);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+}
+.take-note-bubble-mic .svg-icon { width: 40px; height: 40px; overflow: visible; }
+
+/* Each side is a line that starts at the mic. */
+.take-note-bubble-zone { display: flex; gap: 6px; border-radius: var(--radius-l); padding: 2px; transition: background-color 0.12s ease; }
+.take-note-bubble-zone.is-left { grid-area: left; flex-direction: row-reverse; justify-self: end; align-items: flex-start; }
+.take-note-bubble-zone.is-right { grid-area: right; flex-direction: row; justify-self: start; align-items: flex-start; }
+.take-note-bubble-zone.is-top { grid-area: top; flex-direction: column-reverse; align-self: end; align-items: center; }
+.take-note-bubble-zone.is-bottom { grid-area: bottom; flex-direction: column; align-self: start; align-items: center; }
+.take-note-bubble-zone.is-drop-target { background-color: hsla(var(--interactive-accent-hsl), 0.1); }
+
+.take-note-bubble-item {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+	width: 56px;
+	cursor: grab;
+	border-radius: var(--radius-m);
+	outline: none;
+}
+.take-note-bubble-zone.is-left .take-note-bubble-item,
+.take-note-bubble-zone.is-right .take-note-bubble-item { padding-top: 6px; }
+.take-note-bubble-item.is-dragging { opacity: 0.35; }
+.take-note-bubble-item.is-hidden { display: none; }
+.take-note-bubble-item:focus-visible .take-note-bubble-face { box-shadow: 0 0 0 3px var(--interactive-accent); }
+.take-note-bubble-face,
+.take-note-bubble-ghost,
+.take-note-bubble-slot {
+	width: 44px;
+	height: 44px;
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+}
+.take-note-bubble-face {
+	color: var(--icon-color);
+	background: var(--background-secondary-alt);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.take-note-bubble-item:hover .take-note-bubble-face { color: var(--icon-color-hover); transform: translateY(-2px); box-shadow: var(--shadow-l); }
+.take-note-bubble-face .svg-icon { width: 20px; height: 20px; }
+.take-note-bubble-caption { font-size: var(--font-ui-smaller); color: var(--text-muted); text-align: center; line-height: 1.15; }
+.take-note-bubble-zone.is-left .take-note-bubble-ghost,
+.take-note-bubble-zone.is-right .take-note-bubble-ghost,
+.take-note-bubble-zone.is-left .take-note-bubble-slot,
+.take-note-bubble-zone.is-right .take-note-bubble-slot { margin-top: 6px; }
+/* Where a dragged bubble will land. */
+.take-note-bubble-ghost { border: 2px dashed var(--interactive-accent); background-color: hsla(var(--interactive-accent-hsl), 0.12); }
+/* An open spot at the end of a line: faint on empty sides, clear while dragging. */
+.take-note-bubble-slot { color: var(--text-faint); border: 1px dashed var(--background-modifier-border-hover); opacity: 0; transition: opacity 0.12s ease; }
+.take-note-bubble-slot .svg-icon { width: 16px; height: 16px; }
+.take-note-bubble-slot.is-empty-side { opacity: 0.6; }
+.take-note-bubble-editor.is-dragging .take-note-bubble-slot { opacity: 1; }
+.take-note-bubble-editor.is-dragging .take-note-bubble-zone:has(.take-note-bubble-ghost) .take-note-bubble-slot { display: none; }
+
+.take-note-bubble-item .take-note-bubble-remove {
+	position: absolute;
+	top: 0;
+	right: 0;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	color: var(--text-on-accent);
+	background-color: var(--background-modifier-error);
+	border: none;
+	box-shadow: var(--shadow-s);
+	opacity: 0;
+	transition: opacity 0.12s ease;
+	cursor: var(--cursor);
+}
+.take-note-bubble-item:hover .take-note-bubble-remove,
+.take-note-bubble-item:focus-within .take-note-bubble-remove { opacity: 1; }
+.take-note-bubble-editor.is-dragging .take-note-bubble-remove { opacity: 0; }
+.take-note-bubble-remove .svg-icon { width: 12px; height: 12px; stroke-width: 3; }
+.take-note-bubble-hint { font-size: var(--font-ui-smaller); color: var(--text-faint); text-align: center; }
+
+/* "Add": chips to drag in or click, and the place to drop a bubble to remove it. */
+.take-note-bubble-tray { position: relative; margin-top: var(--size-4-3); padding: var(--size-4-2); border-radius: var(--radius-l); border: 1px dashed transparent; transition: border-color 0.12s ease, background-color 0.12s ease; }
+.take-note-bubble-editor.is-dragging-placed .take-note-bubble-tray { border-color: var(--background-modifier-border-hover); }
+.take-note-bubble-tray.is-drop-target { border-color: var(--background-modifier-error); background-color: rgba(var(--color-red-rgb), 0.08); }
+.take-note-bubble-remove-hint { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; font-size: var(--font-ui-small); color: var(--text-error); background-color: var(--background-primary); border-radius: var(--radius-l); opacity: 0.92; pointer-events: none; }
+.take-note-bubble-tray.is-drop-target .take-note-bubble-remove-hint { display: flex; }
+.take-note-bubble-subhead { margin-bottom: var(--size-4-2); font-size: var(--font-ui-small); color: var(--text-muted); font-weight: var(--font-medium); }
+.take-note-bubble-chips { display: flex; flex-wrap: wrap; gap: var(--size-4-2); }
+.take-note-bubble-chips .take-note-bubble-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: auto;
+	padding: 4px 12px 4px 8px;
+	border-radius: var(--radius-l);
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	background-color: var(--background-secondary-alt);
+	border: 1px dashed var(--background-modifier-border-hover);
+	box-shadow: none;
+	cursor: grab;
+}
+.take-note-bubble-chips .take-note-bubble-chip:hover:not(:disabled) { border-style: solid; border-color: var(--interactive-accent); background-color: var(--background-modifier-hover); }
+.take-note-bubble-chips .take-note-bubble-chip:disabled { opacity: 0.45; cursor: default; }
+.take-note-bubble-chip-icon { display: inline-flex; color: var(--icon-color); }
+.take-note-bubble-chip-icon .svg-icon { width: 14px; height: 14px; }

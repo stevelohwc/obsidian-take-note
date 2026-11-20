@@ -58,6 +58,7 @@ export interface ExtractInput {
 	outputLanguage: string; // "English" or "same as the meeting"
 	knownPeople: string[];
 	extraInstructions: string;
+	kind?: "meeting" | "chat"; // chat: WhatsApp/Telegram messages instead of a meeting transcript
 }
 
 export type ChatFn = (
@@ -88,15 +89,26 @@ export function systemPrompt(input: ExtractInput): string {
 	const people = input.knownPeople.length
 		? `\nKnown people (use these exact spellings when the transcript or notes clearly refer to them): ${input.knownPeople.slice(0, 200).join(", ")}.`
 		: "";
+	const chat = input.kind === "chat";
 	const lang =
 		input.outputLanguage.toLowerCase().startsWith("same")
-			? "Write in the main language of the meeting."
+			? `Write in the main language of the ${chat ? "chat" : "meeting"}.`
 			: `Write in ${input.outputLanguage}. Keep Chinese or other non-English phrases verbatim when they carry specific meaning (names, idioms, product terms).`;
-	return `You are a meticulous meeting secretary. You turn rough meeting notes and speech-to-text transcripts into structured, actionable records.
+	const intro = chat
+		? "You are a meticulous secretary. You turn a chat conversation (WhatsApp or Telegram messages) and the user's own notes into structured, actionable records. In the schema, \"meeting\" means this chat."
+		: "You are a meticulous meeting secretary. You turn rough meeting notes and speech-to-text transcripts into structured, actionable records.";
+	const dates = chat
+		? `The chat's last message is on ${input.date}${weekday}. Lines like "--- 2026-11-20 (Friday) ---" give the date of the messages below them: resolve relative dates ("Friday", "next week", "tomorrow") to YYYY-MM-DD from the date of the message they appear in.`
+		: `The meeting date is ${input.date}${weekday}. Resolve relative dates ("Friday", "next week", "tomorrow") to YYYY-MM-DD.`;
+	const labels = chat
+		? `- The transcript is the chat: one message per line, "[10:15] Name: message" (several lines of one message are joined with " / "). Sender names come from the chat export and are exact. "I"/"me" inside a message means its sender; ${input.myName}'s own messages are labelled ${input.myName}. Markers like [photo], [voice message] or [file: x] stand for media you cannot see.
+- Chats ramble: skip greetings, small talk and reactions. Commitments count when someone agrees ("ok will do", "sure, by Friday").`
+		: `- Transcript lines may start with a speaker label ("[00:01:02] Alice: ..."). Labels come from voice recognition: trust them for who said what, but if the content clearly contradicts a label, trust the content. "Speaker 1", "Speaker 2"… are unrecognised voices: if the conversation makes clear who they are (they are addressed by name and answer), use the real name in your output; otherwise keep the label.`;
+	return `${intro}
 
 Rules:
 - Use only what the input supports. Never invent owners, dates, numbers or decisions. Use null when unknown.
-- The meeting date is ${input.date}${weekday}. Resolve relative dates ("Friday", "next week", "tomorrow") to YYYY-MM-DD.
+- ${dates}
 - The notes are written by ${input.myName}. "I", "me", "my" in the notes refer to ${input.myName}. Do NOT make ${input.myName} the owner of anything unless the input says "I"/"me" or names ${input.myName}; impersonal notes ("need to prove X") have owner null.
 - attendees: only people (names or initials). Never companies, banks, clients, teams or systems. Do not add ${input.myName} unless they are mentioned.
 - Input may mix languages and use shorthand: "->" usually means "leads to / next step"; short uppercase tokens may be people's initials. Speech-to-text has errors; fix obvious mis-hearings using context.
@@ -107,8 +119,8 @@ Rules:
 - tickets: engineering or ops work worth tracking in Jira/Linear (bugs, features, improvements). Give 1-4 testable acceptance criteria each. Small personal to-dos stay as action items only.
 - ai_assignments: tasks from this meeting that an AI assistant could do or draft for ${input.myName} (write a doc, draft a message, write test cases, a script, a query, research, a comparison). "prompt" must be a complete, self-contained instruction including all needed context from the meeting, ready to paste into an AI chat.
 - questions: things left unanswered or needing clarification.
-- Transcript lines may start with a speaker label ("[00:01:02] Alice: ..."). Labels come from voice recognition: trust them for who said what, but if the content clearly contradicts a label, trust the content. "Speaker 1", "Speaker 2"… are unrecognised voices: if the conversation makes clear who they are (they are addressed by name and answer), use the real name in your output; otherwise keep the label.
-- by_person: one entry per person who spoke or was given work (including ${input.myName} if they spoke). summary = one line on their part in this meeting; updates = what they reported; commitments = what they will do; asks = questions or needs they raised. Skip people who were only mentioned in passing.
+${labels}
+- by_person: one entry per person who ${chat ? "wrote" : "spoke"} or was given work (including ${input.myName} if they ${chat ? "wrote" : "spoke"}). summary = one line on their part in this ${chat ? "chat" : "meeting"}; updates = what they reported; commitments = what they will do; asks = questions or needs they raised. Skip people who were only mentioned in passing.
 - Keep every item short and specific. Prefer more distinct items over vague merged ones. Empty arrays are fine.
 - ${lang}${people}
 ${input.extraInstructions ? "\nAdditional instructions from the user:\n" + input.extraInstructions + "\n" : ""}
@@ -116,9 +128,9 @@ Respond with ONLY one JSON object, no prose, matching this schema:
 ${SCHEMA}`;
 }
 
-function userPrompt(notes: string, transcript: string, part?: { index: number; total: number }): string {
+function userPrompt(notes: string, transcript: string, part?: { index: number; total: number }, chat = false): string {
 	const parts: string[] = [];
-	if (part) parts.push(`This is part ${part.index} of ${part.total} of the transcript of one meeting. Extract what is in this part.`);
+	if (part) parts.push(`This is part ${part.index} of ${part.total} of ${chat ? "one chat conversation" : "the transcript of one meeting"}. Extract what is in this part.`);
 	if (notes.trim()) parts.push(`<my_notes>\n${notes.trim()}\n</my_notes>`);
 	if (transcript.trim()) parts.push(`<transcript>\n${transcript.trim()}\n</transcript>`);
 	if (!notes.trim() && !transcript.trim()) parts.push("(empty)");
@@ -344,11 +356,12 @@ export async function extractMeeting(
 
 async function extractRaw(chat: ChatFn, input: ExtractInput, maxInputTokens: number): Promise<MeetingNotes> {
 	const system = systemPrompt(input);
+	const isChat = input.kind === "chat";
 	const budget = Math.max(2000, maxInputTokens - estimateTokens(system) - estimateTokens(input.notes) - 500);
 	const transcriptChunks = input.transcript.trim() ? chunkText(input.transcript, budget) : [""];
 
 	if (transcriptChunks.length === 1) {
-		return askJson(chat, system, userPrompt(input.notes, transcriptChunks[0]), "Analysing meeting");
+		return askJson(chat, system, userPrompt(input.notes, transcriptChunks[0]), isChat ? "Analysing chat" : "Analysing meeting");
 	}
 
 	const partials: MeetingNotes[] = [];
@@ -357,13 +370,13 @@ async function extractRaw(chat: ChatFn, input: ExtractInput, maxInputTokens: num
 			await askJson(
 				chat,
 				system,
-				userPrompt(input.notes, transcriptChunks[i], { index: i + 1, total: transcriptChunks.length }),
+				userPrompt(input.notes, transcriptChunks[i], { index: i + 1, total: transcriptChunks.length }, isChat),
 				`Analysing part ${i + 1}/${transcriptChunks.length}`,
 			),
 		);
 	}
 	const mergeUser =
-		`Below are ${partials.length} partial extractions from consecutive parts of ONE meeting. ` +
+		`Below are ${partials.length} partial extractions from consecutive parts of ONE ${isChat ? "chat conversation" : "meeting"}. ` +
 		`Merge them into one JSON object with the same schema: remove duplicates, keep every distinct item, ` +
 		`write one overall title and summary.\n\n` +
 		partials.map((p, i) => `<part n="${i + 1}">\n${JSON.stringify(p)}\n</part>`).join("\n");

@@ -14,8 +14,9 @@ export interface ParsedTranscript {
 	lines: TranscriptLine[];
 }
 
-const HEADER = /^\[!quote\][-+]?\s*Transcript(?:\s*\((.*)\))?\s*$/i;
-const LINE = /^(?:\[(\d{1,2}):(\d{2}):(\d{2})\]\s*)?(.*)$/;
+const HEADER = /^\[!quote\][-+]?\s*(?:Transcript|Chat)(?:\s*\((.*)\))?\s*$/i;
+// "[00:01:02]" is a position in the recording; a chat's "[10:15]" is a time of day (nothing to seek to).
+const LINE = /^(?:\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]\s*)?(.*)$/;
 // "Alice: …", "Speaker 2: …", "Dana Lee: …" — a short name before the first colon.
 const SPEAKER = /^([^:[\]()]{1,32}?):\s+(.*)$/;
 
@@ -40,8 +41,9 @@ export function parseTranscript(block: string): ParsedTranscript {
 		}
 		const m = body.match(LINE);
 		if (!m) continue;
-		const hasTime = m[1] !== undefined;
+		const hasTime = m[3] !== undefined;
 		const seconds = hasTime ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
+		const clock = hasTime ? `${m[1]}:${m[2]}:${m[3]}` : m[1] !== undefined ? `${m[1]}:${m[2]}` : null;
 		let speaker: string | null = null;
 		let text = m[4];
 		const sp = text.match(SPEAKER);
@@ -50,7 +52,7 @@ export function parseTranscript(block: string): ParsedTranscript {
 			text = sp[2];
 		}
 		if (text === "(no speech detected)") continue;
-		lines.push({ seconds, clock: hasTime ? `${m[1]}:${m[2]}:${m[3]}` : null, speaker, text });
+		lines.push({ seconds, clock, speaker, text });
 	}
 	return { audioLink, meta, lines };
 }

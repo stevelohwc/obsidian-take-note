@@ -1,5 +1,7 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting, type SettingDefinitionItem } from "obsidian";
 import type TakeNote from "./main.ts";
+import { type BubbleLayout, DEFAULT_LAYOUT, copyLayout } from "./bubbles.ts";
+import { renderBubbleEditor } from "./bubble-editor.ts";
 import { PROVIDERS, type ProviderId, providerModels } from "./providers.ts";
 import { listInputDevices } from "./recorder.ts";
 import { checkWhisperSetup } from "./transcribe.ts";
@@ -20,6 +22,10 @@ export interface TakeNoteSettings {
 	// Floating button
 	showFloatingButton: boolean;
 	floatingButtonPos: { right: number; bottom: number } | null;
+	/** Show action bubbles beside the button on hover. */
+	fabBubblesOn: boolean;
+	/** Which bubbles go on each side of the button, nearest the button first. */
+	fabLayout: BubbleLayout;
 	/** Put the Take Note panel in the right sidebar whenever Obsidian starts or the plugin loads. */
 	showSidebar: boolean;
 	// Notes
@@ -41,6 +47,7 @@ export interface TakeNoteSettings {
 	micDeviceId: string;
 	/** Recordings stopped before this many seconds are treated as accidental and discarded. 0 = keep all. */
 	minRecordingSeconds: number;
+	liveTranscript: boolean;
 	autoTranscribe: boolean;
 	autoProcess: boolean;
 	ffmpegPath: string;
@@ -64,6 +71,8 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	providerMemory: {},
 	showFloatingButton: true,
 	floatingButtonPos: null,
+	fabBubblesOn: true,
+	fabLayout: copyLayout(DEFAULT_LAYOUT),
 	showSidebar: true,
 	meetingsFolder: "Meetings",
 	peopleFolder: "People",
@@ -80,6 +89,7 @@ export const DEFAULT_SETTINGS: TakeNoteSettings = {
 	matchThreshold: 0.6,
 	micDeviceId: "",
 	minRecordingSeconds: 20,
+	liveTranscript: true,
 	autoTranscribe: true,
 	autoProcess: true,
 	ffmpegPath: "/opt/homebrew/bin/ffmpeg",
@@ -148,7 +158,7 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 	}
 
 	private sections(): Section[] {
-		return [this.llmSection(), this.notesSection(), this.speakersSection(), this.recordingSection()];
+		return [this.llmSection(), this.notesSection(), this.floatingSection(), this.speakersSection(), this.recordingSection()];
 	}
 
 	private save(): Promise<void> {
@@ -349,16 +359,48 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 							})),
 						),
 				},
+				folder("Meetings folder", "Where new meeting notes are created.", "meetingsFolder"),
+				folder("People folder", "If it exists, names in it are given to Whisper and the AI so people are spelled and linked consistently.", "peopleFolder"),
+				toggle("Link people as [[wikilinks]]", undefined, "linkPeople"),
+				toggle("Tasks plugin format", "Add 📅 due dates and ⏫ priorities to action items so the Tasks plugin can query them.", "tasksEmoji"),
+				toggle("Rename note from AI title", "Turns \"2026-11-19 – Meeting 1530\" into \"2026-11-19 – Bot Flow Review\". Only renames notes that still have the default name.", "renameFromTitle"),
+				toggle("Update People notes", "After each meeting, add a line to each speaker's note in the People folder, e.g. \"- [[2026-11-19 – Bot Flow Review]] — reported the release is ready\". Re-running replaces that line.", "updatePeopleNotes"),
+				toggle("Create missing People notes", "Also create a People note for named speakers who don't have one yet. Unrecognised \"Speaker N\" voices are never created.", "createPeopleNotes"),
+			],
+		};
+	}
+
+	private floatingSection(): Section {
+		const s = this.plugin.settings;
+		const changed = async (redraw: boolean) => {
+			await this.save();
+			this.plugin.refreshFloatingButton();
+			if (redraw) this.redraw();
+		};
+		const editor: Row = {
+			name: "Your bubbles",
+			desc: "This is how they look around the button. Drag them to any side, or drag one out to remove it. Hover one for what it does; some only appear when they apply (Pause while recording, Cancel while a job runs).",
+			aliases: ["bubbles", "quick actions"],
+			render: (setting) => {
+				setting.settingEl.addClass("take-note-bubble-editor-row");
+				renderBubbleEditor(setting.settingEl, s.fabLayout, later(async (layout: BubbleLayout) => {
+					s.fabLayout = layout;
+					await changed(false);
+				}));
+			},
+		};
+		return {
+			heading: "Floating button",
+			rows: [
 				{
 					name: "Floating mic button",
-					desc: "A mic button over your notes: click to start or stop recording, right-click for more. Drag it anywhere.",
+					desc: "A mic button over your notes: click to start or stop recording, hover for bubbles, right-click for everything. Drag it anywhere.",
 					render: (setting) =>
 						setting
 							.addToggle((t) =>
 								t.setValue(s.showFloatingButton).onChange(later(async (v) => {
 									s.showFloatingButton = v;
-									await this.save();
-									this.plugin.refreshFloatingButton();
+									await changed(true);
 								})),
 							)
 							.addExtraButton((b) =>
@@ -372,13 +414,29 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 									})),
 							),
 				},
-				folder("Meetings folder", "Where new meeting notes are created.", "meetingsFolder"),
-				folder("People folder", "If it exists, names in it are given to Whisper and the AI so people are spelled and linked consistently.", "peopleFolder"),
-				toggle("Link people as [[wikilinks]]", undefined, "linkPeople"),
-				toggle("Tasks plugin format", "Add 📅 due dates and ⏫ priorities to action items so the Tasks plugin can query them.", "tasksEmoji"),
-				toggle("Rename note from AI title", "Turns \"2026-11-19 – Meeting 1530\" into \"2026-11-19 – Bot Flow Review\". Only renames notes that still have the default name.", "renameFromTitle"),
-				toggle("Update People notes", "After each meeting, add a line to each speaker's note in the People folder, e.g. \"- [[2026-11-19 – Bot Flow Review]] — reported the release is ready\". Re-running replaces that line.", "updatePeopleNotes"),
-				toggle("Create missing People notes", "Also create a People note for named speakers who don't have one yet. Unrecognised \"Speaker N\" voices are never created.", "createPeopleNotes"),
+				{
+					name: "Bubbles on hover",
+					desc: "Hover the button to show a few actions beside it. Right-click it for everything.",
+					aliases: ["quick actions", "hover menu"],
+					render: (setting) =>
+						setting
+							.addToggle((t) =>
+								t.setValue(s.fabBubblesOn).onChange(later(async (v) => {
+									s.fabBubblesOn = v;
+									await changed(true);
+								})),
+							)
+							.addExtraButton((b) =>
+								b
+									.setIcon("rotate-ccw")
+									.setTooltip("Back to the default bubbles")
+									.onClick(later(async () => {
+										s.fabLayout = copyLayout(DEFAULT_LAYOUT);
+										await changed(true);
+									})),
+							),
+				},
+				...(s.showFloatingButton && s.fabBubblesOn ? [editor] : []),
 			],
 		};
 	}
@@ -474,8 +532,9 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 
 	private recordingSection(): Section {
 		const s = this.plugin.settings;
-		const toggle = (name: string, key: "autoTranscribe" | "autoProcess" | "timestamps"): Row => ({
+		const toggle = (name: string, key: "liveTranscript" | "autoTranscribe" | "autoProcess" | "timestamps", desc?: string): Row => ({
 			name,
+			desc,
 			render: (setting) =>
 				setting.addToggle((t) =>
 					t.setValue(s[key]).onChange(later(async (v) => {
@@ -528,6 +587,11 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 							})),
 						),
 				},
+				toggle(
+					"Live transcript",
+					"liveTranscript",
+					"Show what is being said in the sidebar's Transcript tab while you record, about 15 seconds behind. Runs locally with Whisper; uses no tokens. Speaker names are added by the full transcription when you stop.",
+				),
 				toggle("Transcribe automatically when recording stops", "autoTranscribe"),
 				toggle("Run AI automatically after transcription", "autoProcess"),
 				{
