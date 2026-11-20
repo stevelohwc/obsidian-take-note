@@ -10,7 +10,7 @@ choice turn it into a structured note. It works the same way for things you didn
 |---|---|---|---|
 | Click the floating mic button | Zoom, Teams or phone audio / video | WhatsApp or Telegram, export or copied messages | Rough notes or a Zoom / Teams / Meet transcript |
 
-![The floating mic button: idle, recording, paused and thinking](docs/mascot.png)
+<p align="center"><img src="docs/mascot.png" width="720" alt="The floating mic button's four faces: Ready (click to record), Listening (recording, with a red ring), Paused, and Thinking (writing your notes)"></p>
 
 ## What you get
 
