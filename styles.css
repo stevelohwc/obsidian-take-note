@@ -307,7 +307,8 @@
 .take-note-bubble-slot .svg-icon { width: 16px; height: 16px; }
 .take-note-bubble-slot.is-empty-side { opacity: 0.6; }
 .take-note-bubble-editor.is-dragging .take-note-bubble-slot { opacity: 1; }
-.take-note-bubble-editor.is-dragging .take-note-bubble-zone:has(.take-note-bubble-ghost) .take-note-bubble-slot { display: none; }
+/* The side a bubble would land on shows the drop marker instead of its "+" slot. */
+.take-note-bubble-editor.is-dragging .take-note-bubble-zone.is-drop-target .take-note-bubble-slot { display: none; }
 
 .take-note-bubble-item .take-note-bubble-remove {
 	position: absolute;

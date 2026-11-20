@@ -1,8 +1,7 @@
 // Live transcript while recording. The recorder's audio is decoded as it arrives (ffmpeg reading
 // from a pipe), and every ~12 seconds the newest piece goes through whisper-cli. The result is a
 // draft without speaker names; the full transcription after the recording stops replaces it.
-import type { ChildProcess } from "child_process";
-import { childProcess, fs, os, path } from "./node.ts";
+import { type ChildProcess, childProcess, fs, os, path } from "./node.ts";
 import { RATE, chunkWindow, contextTail, findCut, rms, splitSentences, wavFile } from "./live-audio.ts";
 import { isHallucination } from "./render.ts";
 import { type WhisperConfig, expandHome, run } from "./transcribe.ts";

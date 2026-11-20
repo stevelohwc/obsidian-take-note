@@ -3,13 +3,16 @@
 // (recording, transcription, speakers) is only reachable on desktop; if it ever ran on a
 // phone, the stand-in below says what went wrong instead of failing silently.
 import { Platform } from "obsidian";
-import type * as ChildProcessModule from "child_process";
-import type * as ElectronModule from "electron";
-import type * as FsModule from "fs";
-import type * as HttpModule from "http";
-import type * as HttpsModule from "https";
-import type * as OsModule from "os";
-import type * as PathModule from "path";
+
+// The modules' types, named without an import statement: nothing here loads them.
+export type FsModule = typeof import("fs");
+export type OsModule = typeof import("os");
+export type PathModule = typeof import("path");
+export type ChildProcessModule = typeof import("child_process");
+export type ChildProcess = import("child_process").ChildProcess;
+type HttpModule = typeof import("http");
+type HttpsModule = typeof import("https");
+type ElectronModule = typeof import("electron");
 
 /** True in the desktop app (also under its mobile emulation, where Node still exists). */
 export const hasNode = Platform.isDesktopApp;
@@ -26,14 +29,14 @@ function unavailable<T>(name: string): T {
 }
 
 // Each require() sits right behind its own desktop check, as Obsidian's guidelines ask.
-export const fs = Platform.isDesktopApp ? (window.require("fs") as typeof FsModule) : unavailable<typeof FsModule>("fs");
-export const os = Platform.isDesktopApp ? (window.require("os") as typeof OsModule) : unavailable<typeof OsModule>("os");
-export const path = Platform.isDesktopApp ? (window.require("path") as typeof PathModule) : unavailable<typeof PathModule>("path");
+export const fs = Platform.isDesktopApp ? (window.require("fs") as FsModule) : unavailable<FsModule>("fs");
+export const os = Platform.isDesktopApp ? (window.require("os") as OsModule) : unavailable<OsModule>("os");
+export const path = Platform.isDesktopApp ? (window.require("path") as PathModule) : unavailable<PathModule>("path");
 export const childProcess = Platform.isDesktopApp
-	? (window.require("child_process") as typeof ChildProcessModule)
-	: unavailable<typeof ChildProcessModule>("child_process");
-export const http = Platform.isDesktopApp ? (window.require("http") as typeof HttpModule) : unavailable<typeof HttpModule>("http");
-export const https = Platform.isDesktopApp ? (window.require("https") as typeof HttpsModule) : unavailable<typeof HttpsModule>("https");
+	? (window.require("child_process") as ChildProcessModule)
+	: unavailable<ChildProcessModule>("child_process");
+export const http = Platform.isDesktopApp ? (window.require("http") as HttpModule) : unavailable<HttpModule>("http");
+export const https = Platform.isDesktopApp ? (window.require("https") as HttpsModule) : unavailable<HttpsModule>("https");
 export const electron = Platform.isDesktopApp
-	? (window.require("electron") as typeof ElectronModule)
-	: unavailable<typeof ElectronModule>("electron");
+	? (window.require("electron") as ElectronModule)
+	: unavailable<ElectronModule>("electron");

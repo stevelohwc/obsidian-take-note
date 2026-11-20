@@ -1,7 +1,6 @@
 // Local speech-to-text with whisper.cpp (whisper-cli) + ffmpeg, and optional speaker
 // separation with sherpa-onnx. Runs entirely on this Mac.
-import type { ChildProcess } from "child_process";
-import { childProcess, fs, os, path } from "./node.ts";
+import { type ChildProcess, childProcess, fs, os, path } from "./node.ts";
 import { cleanTranscript, isHallucination } from "./render.ts";
 import {
 	type DiarSegment,
