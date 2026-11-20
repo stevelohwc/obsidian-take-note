@@ -274,7 +274,8 @@ export class TakeNoteView extends ItemView {
 		const block = getBlock(content, TX_START, TX_END);
 		const parsed = block === null ? null : parseTranscript(block);
 		const live = this.plugin.liveTranscript(note);
-		if (live && (!parsed || !parsed.lines.length || parsed.meta === "pending")) {
+		// While recording, the live draft wins even over an older transcript in the note.
+		if (live && (this.plugin.isRecordingInto(note) || !parsed || !parsed.lines.length || parsed.meta === "pending")) {
 			this.renderLive(pane, live);
 			return;
 		}

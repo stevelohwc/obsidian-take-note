@@ -835,6 +835,11 @@ export default class TakeNote extends Plugin {
 	// ---------- live transcript ----------
 
 	/** The live draft for this note, if it has one (while recording, and until the full transcript is in). */
+	/** Whether `note` is the one being recorded right now. */
+	isRecordingInto(note: TFile): boolean {
+		return this.recording?.note === note;
+	}
+
 	liveTranscript(note: TFile): { lines: LiveLine[]; listening: boolean; error: string | null } | null {
 		if (this.live?.note !== note) return null;
 		const t = this.live.t;
