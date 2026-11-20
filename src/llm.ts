@@ -58,7 +58,12 @@ function nodeRequest(url: URL, method: string, headers: Record<string, string>, 
 					status: res.statusCode ?? 0,
 					contentType: String(res.headers["content-type"] ?? ""),
 					chunks: async function* () {
-						for await (const c of res) yield (c as Buffer).toString("utf8");
+						// One decoder for the whole reply: a character split across two network
+						// chunks (Chinese, emoji…) is held back until its last byte arrives.
+						const dec = new TextDecoder("utf-8");
+						for await (const c of res) yield dec.decode(c as Buffer, { stream: true });
+						const rest = dec.decode();
+						if (rest) yield rest;
 					},
 				}),
 		);
@@ -73,13 +78,22 @@ function nodeRequest(url: URL, method: string, headers: Record<string, string>, 
 	});
 }
 
+/** Rejects once `signal` is aborted. */
+function cancelled(signal: AbortSignal): Promise<never> {
+	return new Promise((_, reject) => {
+		if (signal.aborted) reject(new Error("Cancelled"));
+		else signal.addEventListener("abort", () => reject(new Error("Cancelled")), { once: true });
+	});
+}
+
 /** Phones: one plain request through Obsidian (no CORS limits). The whole reply arrives at the end. */
 async function plainReply(url: URL, method: string, headers: Record<string, string>, body: string | null, signal?: AbortSignal): Promise<Reply> {
 	if (!plainRequest) throw new Error("No way to reach the AI on this device.");
 	if (signal?.aborted) throw new Error("Cancelled");
 	const plainBody = body ? JSON.stringify({ ...(JSON.parse(body) as object), stream: false }) : undefined;
-	const res = await plainRequest({ url: url.toString(), method, headers: { ...headers, Accept: "application/json" }, body: plainBody });
-	if (signal?.aborted) throw new Error("Cancelled");
+	const sent = plainRequest({ url: url.toString(), method, headers: { ...headers, Accept: "application/json" }, body: plainBody });
+	// requestUrl can't be stopped, but Cancel shouldn't wait for it: stop waiting right away.
+	const res = signal ? await Promise.race([sent, cancelled(signal)]) : await sent;
 	const type = Object.entries(res.headers).find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "application/json";
 	return {
 		status: res.status,
