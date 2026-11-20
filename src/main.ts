@@ -8,9 +8,9 @@ import {
 	TFile,
 	TFolder,
 	normalizePath,
+	requestUrl,
 } from "obsidian";
-import { webUtils } from "electron";
-import * as path from "path";
+import { electron, fs, os, path } from "./node.ts";
 import { DEFAULT_SETTINGS, TakeNoteSettingTab, TakeNoteSettings } from "./settings.ts";
 import { MeetingRecorder } from "./recorder.ts";
 import { type SpeakerConfig, checkWhisperSetup, embedWav, toWav, transcribeFile } from "./transcribe.ts";
@@ -20,9 +20,9 @@ import { addVoice, findNode, loadSession, loadVoices, newSessionId, saveSession,
 import { renameSpeaker, transcriptSpeakers } from "./speakers.ts";
 import { NameSpeakersModal, VoiceSampleModal } from "./modals.ts";
 import { type ChatImport, ImportChatModal } from "./chat-modal.ts";
-import * as fs from "fs";
-import * as os from "os";
 import { PROVIDERS, type ProviderId, inferProvider, providerChat } from "./providers.ts";
+import { setPlainRequest } from "./llm.ts";
+import { hasDesktopFeatures } from "./platform.ts";
 import { type FabAction, FloatingButton } from "./fab.ts";
 import { BUBBLES, type BubbleId, SIDES, type Side, normalizeLayout } from "./bubbles.ts";
 import { MASCOT_ICON, type Mood, registerMascotIcons } from "./mascot.ts";
@@ -51,6 +51,11 @@ const AUDIO_EXT = ["webm", "m4a", "mp3", "wav", "ogg", "opus", "aac", "flac", "m
 function asList(v: unknown): string[] {
 	if (v === undefined || v === null || v === "") return [];
 	return (Array.isArray(v) ? v : [v]).map((x) => String(x).replace(/^#/, ""));
+}
+
+/** A vault path's file name without its extension ("Meetings/2026-11-20 – Sync.md" → "2026-11-20 – Sync"). */
+function fileBase(p: string): string {
+	return p.slice(p.lastIndexOf("/") + 1).replace(/\.[^.]*$/, "");
 }
 
 const DEFAULT_NAME = /^\d{4}-\d{2}-\d{2} – Meeting( \d{4})?( \d+)?$/;
@@ -113,7 +118,14 @@ export default class TakeNote extends Plugin {
 		this.registerInterval(window.setInterval(() => this.updateStatus(), 1000));
 
 		registerMascotIcons();
-		this.addRibbonIcon(MASCOT_ICON.idle, "Take Note: start / stop recording", () => this.toggleRecording());
+		const desktop = hasDesktopFeatures();
+		// Phones have no Node http: the AI is reached through Obsidian's requestUrl there.
+		setPlainRequest(async (r) => {
+			const res = await requestUrl({ url: r.url, method: r.method, headers: r.headers, body: r.body, throw: false });
+			return { status: res.status, headers: res.headers, text: res.text };
+		});
+		if (desktop) this.addRibbonIcon(MASCOT_ICON.idle, "Take Note: start / stop recording", () => this.toggleRecording());
+		else this.addRibbonIcon(MASCOT_ICON.idle, "Take Note", (evt) => this.mobileMenu(evt));
 		this.registerView(VIEW_TYPE, (leaf) => new TakeNoteView(leaf, this));
 		this.app.workspace.onLayoutReady(() => {
 			this.refreshFloatingButton();
@@ -135,6 +147,38 @@ export default class TakeNote extends Plugin {
 				await this.openNote(f);
 			},
 		});
+		if (desktop) this.addRecordingCommands();
+		this.addCommand({
+			id: "process-note",
+			name: "Summarize & extract action items, tickets, questions (AI)",
+			checkCallback: (checking) => {
+				const f = this.activeNote();
+				if (!f) return false;
+				if (!checking) void this.processNote(f);
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "import-chat",
+			name: "Import a chat (WhatsApp / Telegram export or pasted messages)",
+			callback: () => this.importChat(),
+		});
+		this.addCommand({
+			id: "cancel",
+			name: desktop ? "Cancel running transcription / AI job" : "Cancel running AI job",
+			checkCallback: (checking) => {
+				if (!this.jobs.size) return false;
+				if (!checking) {
+					this.jobs.forEach((c) => c.abort());
+					new Notice("Take Note: cancelled.");
+				}
+				return true;
+			},
+		});
+	}
+
+	/** Commands that need the desktop app: the microphone, Whisper and speaker separation. */
+	private addRecordingCommands() {
 		this.addCommand({
 			id: "start-recording-new",
 			name: "Start recording in a new meeting note",
@@ -174,16 +218,6 @@ export default class TakeNote extends Plugin {
 			},
 		});
 		this.addCommand({
-			id: "process-note",
-			name: "Summarize & extract action items, tickets, questions (AI)",
-			checkCallback: (checking) => {
-				const f = this.activeNote();
-				if (!f) return false;
-				if (!checking) void this.processNote(f);
-				return true;
-			},
-		});
-		this.addCommand({
 			id: "transcribe-note-audio",
 			name: "Transcribe audio embedded in the current note",
 			checkCallback: (checking) => {
@@ -199,11 +233,6 @@ export default class TakeNote extends Plugin {
 			callback: () => this.importRecording(),
 		});
 		this.addCommand({
-			id: "import-chat",
-			name: "Import a chat (WhatsApp / Telegram export or pasted messages)",
-			callback: () => this.importChat(),
-		});
-		this.addCommand({
 			id: "name-speakers",
 			name: "Name the speakers in this note (and remember their voices)",
 			checkCallback: (checking) => {
@@ -217,18 +246,6 @@ export default class TakeNote extends Plugin {
 			id: "voice-sample",
 			name: "Record a voice sample for a person",
 			callback: () => this.recordVoiceSample(),
-		});
-		this.addCommand({
-			id: "cancel",
-			name: "Cancel running transcription / AI job",
-			checkCallback: (checking) => {
-				if (!this.jobs.size) return false;
-				if (!checking) {
-					this.jobs.forEach((c) => c.abort());
-					new Notice("Take Note: cancelled.");
-				}
-				return true;
-			},
 		});
 	}
 
@@ -268,7 +285,8 @@ export default class TakeNote extends Plugin {
 	// ---------- floating button ----------
 
 	refreshFloatingButton() {
-		if (!this.settings.showFloatingButton) {
+		// Phones: no hover and no recording, so no floating button (the ribbon menu has the actions).
+		if (!this.settings.showFloatingButton || !hasDesktopFeatures()) {
 			this.fab?.destroy();
 			this.fab = null;
 			return;
@@ -423,6 +441,19 @@ export default class TakeNote extends Plugin {
 			this.refreshFloatingButton();
 			new Notice("Floating button hidden. Turn it back on in Settings → Take Note.");
 		});
+		menu.showAtMouseEvent(evt);
+	}
+
+	/** The ribbon button on phones: what Take Note can do without the desktop app. */
+	private mobileMenu(evt: MouseEvent) {
+		const menu = new Menu();
+		const note = this.activeNote();
+		const add = (title: string, icon: string, run: () => void) => menu.addItem((i) => i.setTitle(title).setIcon(icon).onClick(run));
+		add("Import a chat…", "messages-square", () => this.importChat());
+		if (note) add("Summarize this note with AI", "sparkles", () => void this.processNote(note));
+		if (this.jobs.size) add("Cancel the running job", "x", () => this.cancelJobs());
+		add("Open the sidebar", "panel-right", () => void this.openSidebar(true));
+		add("New meeting note", "file-plus", () => void this.createMeetingNote().then((f) => this.openNote(f)));
 		menu.showAtMouseEvent(evt);
 	}
 
@@ -733,7 +764,7 @@ export default class TakeNote extends Plugin {
 			`created: ${created}`,
 			"people: []",
 			"---",
-			`# ${path.basename(p, ".md")}`,
+			`# ${fileBase(p)}`,
 			"",
 			"## My notes",
 			"- ",
@@ -902,7 +933,7 @@ export default class TakeNote extends Plugin {
 			// Electron: get the real path so large videos are never copied into the vault.
 			let filePath = "";
 			try {
-				filePath = webUtils?.getPathForFile?.(file) ?? "";
+				filePath = electron.webUtils?.getPathForFile?.(file) ?? "";
 			} catch {
 				/* older Electron */
 			}
@@ -919,7 +950,7 @@ export default class TakeNote extends Plugin {
 		input.click();
 	}
 
-	private importChat() {
+	importChat() {
 		const s = this.settings;
 		new ImportChatModal(this.app, { myName: s.myName, maxInputTokens: s.maxInputTokens, summarize: s.autoProcess }, async (c) => {
 			const note = await this.createChatNote(c);
@@ -934,7 +965,7 @@ export default class TakeNote extends Plugin {
 		const date = c.end ?? stamp("YYYY-MM-DD");
 		await this.ensureFolder(this.settings.meetingsFolder);
 		const p = this.uniquePath(this.settings.meetingsFolder, safeFileName(`${date} – ${c.title}`), "md");
-		const body = [`# ${path.basename(p, ".md")}`, "", "## My notes", "- ", "", renderTranscript(c.transcript, null, c.meta, undefined, "Chat"), ""].join("\n");
+		const body = [`# ${fileBase(p)}`, "", "## My notes", "- ", "", renderTranscript(c.transcript, null, c.meta, undefined, "Chat"), ""].join("\n");
 		const note = await this.app.vault.create(p, body);
 		const withTime = await this.createdHasTime();
 		await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {

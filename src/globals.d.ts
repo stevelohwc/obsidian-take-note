@@ -8,3 +8,8 @@ declare module "*.cjs" {
 declare module "electron" {
 	export const webUtils: { getPathForFile?: (file: File) => string } | undefined;
 }
+
+// Electron's renderer puts Node's require() on window (desktop only; see node.ts).
+interface Window {
+	require: (id: string) => unknown;
+}

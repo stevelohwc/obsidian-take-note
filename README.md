@@ -10,6 +10,9 @@ choice turn it into a structured note. It works the same way for things you didn
 |---|---|---|---|
 | Click the floating mic button | Zoom, Teams or phone audio / video | WhatsApp or Telegram, export or copied messages | Rough notes or a Zoom / Teams / Meet transcript |
 
+📱 **On your phone too:** import chats and summarize notes in Obsidian for iOS and Android.
+Recording and transcription need the desktop app.
+
 <p align="center"><img src="docs/mascot.png" width="720" alt="The floating mic button's four faces: Ready (click to record), Listening (recording, with a red ring), Paused, and Thinking (writing your notes)"></p>
 
 ## What you get
@@ -212,11 +215,18 @@ has learned are named automatically, and new voices show as `Speaker 1`, `Speake
 ## FAQ
 
 **Can I use it on my phone?**
-The notes are ordinary Markdown, so they sync and read fine in Obsidian on your phone (through
-Obsidian Sync, iCloud or whatever you use). The plugin itself is desktop-only, because it needs
-the microphone, local programs and the file system. To capture a meeting on the go, record it
-with Obsidian's built-in **Audio recorder** on the phone, then on your computer run
-**Transcribe audio embedded in the current note**.
+Yes, for text. In Obsidian for iOS and Android you can **import a chat** (paste messages, or pick a
+WhatsApp or Telegram export), **summarize** any note, and use the sidebar to read the summary and
+transcript and tick tasks. Tap the Take Note ribbon button for these, or use the command palette.
+The settings show only what works on a phone.
+
+Recording, transcription and speaker separation need the desktop app, because they run Whisper
+and other programs on your computer. To capture a meeting on the go, record it with Obsidian's
+built-in **Audio recorder** on the phone; once it syncs, run
+**Transcribe audio embedded in the current note** on your computer.
+
+On a phone the AI's answer arrives all at once at the end, so there is no live progress while
+it writes. Notes made anywhere sync as ordinary Markdown.
 
 **Which model should I use?**
 Any of them works. A model with a large context window (32K+) does best on long meetings and
@@ -256,11 +266,14 @@ As required by Obsidian's developer policies:
 - **Local programs.** It runs `ffmpeg`, `whisper-cli` and `node` from the paths in settings
   to convert, transcribe and separate speakers. It does not install or update anything itself.
 - **Microphone.** Used only while you are recording.
-- **Desktop only.** Needs the desktop app for the microphone, file system and local programs.
+- **Phones and tablets.** Recording, transcription and speaker separation need the desktop app
+  (microphone, file system and local programs). On mobile, only chat import, the AI summary and
+  the sidebar are offered, and the AI is reached through Obsidian's own network requests.
 
 ## Requirements
 
-- Obsidian **desktop** 1.13.0 or newer
+- Obsidian 1.13.0 or newer. Recording and transcription need the **desktop** app; on phones and
+  tablets you can import chats and summarize notes.
 - An **LLM**. Built in: **OpenAI**, **Claude (Anthropic)**, **OpenRouter**, plus local
   [Ollama](https://ollama.com) / [LM Studio](https://lmstudio.ai) or any OpenAI-compatible
   server (vLLM, LiteLLM…). A model with a large context window (32K+) gives the best results
@@ -288,6 +301,7 @@ As required by Obsidian's developer policies:
 | `src/view.ts`, `src/sidebar-data.ts` | The sidebar: summary, transcript, audio player |
 | `src/extract.ts` | The prompt, JSON parsing, splitting long meetings and chats and merging, priority checks |
 | `src/render.ts` | The Markdown written into your note |
+| `src/platform.ts` | What the device can do: phones get the text features only |
 
 ## Development
 

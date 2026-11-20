@@ -4,6 +4,7 @@ import type TakeNote from "./main.ts";
 import { MASCOT_ICON, type Mood } from "./mascot.ts";
 import { AI_END, AI_START, TX_END, TX_START, getBlock } from "./render.ts";
 import { clock } from "./speakers.ts";
+import { hasDesktopFeatures } from "./platform.ts";
 import type { LiveLine } from "./live.ts";
 import { type TranscriptLine, embedTarget, getMyNotes, parseTranscript, setMyNotes, setTaskInAiBlock } from "./sidebar-data.ts";
 
@@ -168,6 +169,13 @@ export class TakeNoteView extends ItemView {
 			});
 		};
 		const why = busy ? "busy, wait or cancel" : !note ? "open a note first" : undefined;
+		if (!hasDesktopFeatures()) {
+			// Phones: no recording or local transcription, so summarize and import a chat.
+			button("sparkles", "Summarize with AI", () => note && void this.flushNotes().then(() => this.plugin.processNote(note)), why);
+			button("messages-square", "Import a chat (WhatsApp / Telegram)", () => this.plugin.importChat());
+			if (busy) button("x", "Cancel the running AI job", () => this.plugin.cancelJobs());
+			return;
+		}
 		if (s.mood === "recording" || s.mood === "paused") {
 			button(s.mood === "paused" ? "play" : "pause", s.mood === "paused" ? "Resume recording" : "Pause recording", () => this.plugin.togglePause());
 			button("square", "Stop recording, then transcribe and summarize", () => void this.plugin.stopRecording());
@@ -203,7 +211,8 @@ export class TakeNoteView extends ItemView {
 		this.bodyEl.empty();
 
 		if (!note) {
-			this.emptyState("Open a meeting note, or start a new one.", [["mic", "Record a meeting", () => this.plugin.toggleRecording()]]);
+			if (hasDesktopFeatures()) this.emptyState("Open a meeting note, or start a new one.", [["mic", "Record a meeting", () => this.plugin.toggleRecording()]]);
+			else this.emptyState("Open a meeting note, or import a chat.", [["messages-square", "Import a chat", () => this.plugin.importChat()]]);
 			return;
 		}
 
@@ -246,7 +255,8 @@ export class TakeNoteView extends ItemView {
 	private async renderSummary(pane: HTMLElement, note: TFile, content: string) {
 		const md = getBlock(content, AI_START, AI_END);
 		if (md === null) {
-			this.emptyState("No AI notes yet. Write some notes, paste a transcript or record, then summarize.", [["sparkles", "Summarize this note", () => void this.plugin.processNote(note)]], pane);
+			const how = hasDesktopFeatures() ? "Write some notes, paste a transcript or record" : "Write some notes or paste a transcript";
+			this.emptyState(`No AI notes yet. ${how}, then summarize.`, [["sparkles", "Summarize this note", () => void this.plugin.processNote(note)]], pane);
 			return;
 		}
 		const el = pane.createDiv({ cls: "take-note-side-summary markdown-rendered" });
@@ -277,6 +287,14 @@ export class TakeNoteView extends ItemView {
 		// While recording, the live draft wins even over an older transcript in the note.
 		if (live && (this.plugin.isRecordingInto(note) || !parsed || !parsed.lines.length || parsed.meta === "pending")) {
 			this.renderLive(pane, live);
+			return;
+		}
+		if ((!parsed || !parsed.lines.length) && !hasDesktopFeatures()) {
+			this.emptyState(
+				parsed ? "The recording hasn't been transcribed yet. Transcribe it in Obsidian on your computer; the transcript syncs here." : "No transcript in this note yet.",
+				[],
+				pane,
+			);
 			return;
 		}
 		if (!parsed || !parsed.lines.length) {

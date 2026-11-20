@@ -1,9 +1,7 @@
 // Local speech-to-text with whisper.cpp (whisper-cli) + ffmpeg, and optional speaker
 // separation with sherpa-onnx. Runs entirely on this Mac.
-import { spawn, ChildProcess } from "child_process";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import type { ChildProcess } from "child_process";
+import { childProcess, fs, os, path } from "./node.ts";
 import { cleanTranscript, isHallucination } from "./render.ts";
 import {
 	type DiarSegment,
@@ -71,7 +69,7 @@ export function run(
 	return new Promise((resolve, reject) => {
 		let child: ChildProcess;
 		try {
-			child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: env ?? process.env });
+			child = childProcess.spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: env ?? process.env });
 		} catch (e) {
 			reject(e instanceof Error ? e : new Error(String(e)));
 			return;

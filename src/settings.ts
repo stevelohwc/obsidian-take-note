@@ -2,6 +2,7 @@ import { App, Notice, PluginSettingTab, SecretComponent, Setting, type SettingDe
 import type TakeNote from "./main.ts";
 import { type BubbleLayout, DEFAULT_LAYOUT, copyLayout } from "./bubbles.ts";
 import { renderBubbleEditor } from "./bubble-editor.ts";
+import { hasDesktopFeatures } from "./platform.ts";
 import { PROVIDERS, type ProviderId, providerModels } from "./providers.ts";
 import { listInputDevices } from "./recorder.ts";
 import { checkWhisperSetup } from "./transcribe.ts";
@@ -158,6 +159,8 @@ export class TakeNoteSettingTab extends PluginSettingTab {
 	}
 
 	private sections(): Section[] {
+		// Phones get the text features only: no floating button, recording or speakers.
+		if (!hasDesktopFeatures()) return [this.llmSection(), this.notesSection()];
 		return [this.llmSection(), this.notesSection(), this.floatingSection(), this.speakersSection(), this.recordingSection()];
 	}
 

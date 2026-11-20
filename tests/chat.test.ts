@@ -197,15 +197,15 @@ function zip(files: { name: string; text: string; deflate: boolean }[]): Uint8Ar
 	return new Uint8Array(Buffer.concat([...locals, cd, end]));
 }
 
-test("chatTextFromZip finds _chat.txt in a WhatsApp export", () => {
+test("chatTextFromZip finds _chat.txt in a WhatsApp export", async () => {
 	const chatText = "[20/11/2026, 10:15:00] Alice: hi ".repeat(20);
 	const bytes = zip([
 		{ name: "00000012-PHOTO-2026-11-20.jpg", text: "binary", deflate: false },
 		{ name: "_chat.txt", text: chatText, deflate: true },
 	]);
-	assert.equal(chatTextFromZip(bytes), chatText);
-	assert.equal(chatTextFromZip(zip([{ name: "WhatsApp Chat with Bob.txt", text: "x", deflate: false }])), "x");
-	assert.throws(() => chatTextFromZip(new Uint8Array([1, 2, 3])), /zip/);
+	assert.equal(await chatTextFromZip(bytes), chatText);
+	assert.equal(await chatTextFromZip(zip([{ name: "WhatsApp Chat with Bob.txt", text: "x", deflate: false }])), "x");
+	await assert.rejects(() => chatTextFromZip(new Uint8Array([1, 2, 3])), /zip/);
 });
 
 test("system prompt switches to chat wording for chats", () => {
